@@ -212,6 +212,13 @@ def main():
         if not h or h[-1][0] != date:
             h.append([date, s["close"], s["vol"]])
         prices[code] = h[-HISTORY_KEEP:]
+    # 大盤基準：流動性足夠股票的等權重日報酬，累積成指數（首日 = 100），用來計算超額報酬
+    rets = [max(-0.11, min(0.11, s["chg"] / (s["close"] - s["chg"]))) for _, s in liquid if s["close"] - s["chg"] > 0]
+    mean = sum(rets) / len(rets) if rets else 0.0
+    mk = state.get("market") or []
+    if not mk or mk[-1]["date"] != date:
+        mk.append({"date": date, "idx": 100.0 if not mk else round(mk[-1]["idx"] * (1 + mean), 4)})
+    state["market"] = mk[-500:]
     state.update({
         "lastDate": date, "signature": sig,
         "updatedAt": datetime.now(TZ).isoformat(timespec="seconds"),
