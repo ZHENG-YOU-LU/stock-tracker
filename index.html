@@ -3,110 +3,165 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>台股自動研究追蹤 v4.0</title>
+  <title>台股自動研究追蹤</title>
+  <meta name="theme-color" content="#0f172a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="台股追蹤">
+  <link rel="apple-touch-icon" href="icon.png">
+  <link rel="icon" href="icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script>
+    tailwind.config = { darkMode: 'class' };
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem('theme'); } catch (e) {}
+      var dark = t ? t === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (dark) document.documentElement.classList.add('dark');
+    })();
+  </script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <style type="text/tailwindcss">
+    @layer components {
+      .card { @apply rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-700 dark:bg-slate-900; }
+      .sub { @apply text-xs text-slate-500 dark:text-slate-400; }
+      .chip { @apply rounded-full bg-slate-100 px-3 py-1 text-xs dark:bg-slate-800; }
+      .btn { @apply rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800; }
+      .stat { @apply rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900; }
+    }
+  </style>
   <style>
     [x-cloak] { display: none !important; }
     body { font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif; }
-    button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid #4f46e5; outline-offset: 1px; }
+    button:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid #6366f1; outline-offset: 2px; }
   </style>
 </head>
-<body class="bg-slate-50 text-slate-800" x-data="app()" x-init="init()" x-cloak>
+<body class="bg-slate-50 text-slate-800 dark:bg-slate-950 dark:text-slate-100" x-data="app()" x-init="init()" x-cloak
+      style="padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px))">
 
-<header class="sticky top-0 z-20 bg-slate-950 text-white shadow-lg" style="padding-top: env(safe-area-inset-top, 0px)">
-  <div class="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
+<header class="bg-slate-950 text-white" style="padding-top: env(safe-area-inset-top, 0px)">
+  <div class="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-3">
     <div>
       <h1 class="text-lg font-bold">台股自動研究追蹤</h1>
       <p class="text-xs text-slate-400" x-text="updatedText"></p>
     </div>
-    <button type="button" @click="load()" class="rounded-lg bg-slate-800 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-700">重新整理</button>
+    <div class="flex gap-2">
+      <button type="button" @click="toggleTheme()" class="rounded-lg bg-slate-800 px-3 py-1.5 text-xs text-slate-200" aria-label="切換深色模式">🌓</button>
+      <button type="button" @click="load()" class="rounded-lg bg-slate-800 px-3 py-1.5 text-xs text-slate-200" x-text="loading ? '更新中…' : '重新整理'"></button>
+    </div>
   </div>
-  <nav class="mx-auto flex max-w-6xl gap-2 overflow-x-auto px-4 pb-3">
-    <template x-for="tb in tabs" :key="tb.id">
-      <button type="button" @click="tab = tb.id" class="shrink-0 rounded-lg px-4 py-2 text-sm font-medium"
-        :class="tab === tb.id ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'" x-text="tb.label"></button>
-    </template>
-  </nav>
 </header>
 
-<main class="mx-auto max-w-6xl space-y-5 px-4 py-6">
-
+<main class="mx-auto max-w-3xl space-y-4 px-4 py-4">
   <div x-show="error" class="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900" role="alert" x-text="error"></div>
+  <div x-show="staleDays >= 4" class="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" role="alert">
+    ⚠️ 資料已 <b x-text="staleDays"></b> 天沒有更新。若不是連假，請到 GitHub 的 Actions 檢查排程是否失敗。
+  </div>
 
-  <!-- 總覽 -->
-  <section x-show="tab === 'overview' && !error" class="space-y-5">
-    <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
-      <div class="rounded-xl border bg-white p-4"><p class="text-xs text-slate-500">累計推薦</p><p class="mt-1 text-2xl font-bold" x-text="state.recommendations.length"></p></div>
-      <div class="rounded-xl border bg-white p-4"><p class="text-xs text-slate-500">追蹤中</p><p class="mt-1 text-2xl font-bold" x-text="count('追蹤中')"></p></div>
-      <div class="rounded-xl border bg-white p-4"><p class="text-xs text-slate-500">勝率（報酬 &gt; 0）</p><p class="mt-1 text-2xl font-bold" x-text="winRate"></p></div>
-      <div class="rounded-xl border bg-white p-4"><p class="text-xs text-slate-500">平均報酬</p><p class="mt-1 text-2xl font-bold" :class="cls(avgRet)" x-text="pct(avgRet)"></p></div>
+  <!-- ===== 首頁 ===== -->
+  <section x-show="tab === 'home' && !error" class="space-y-4">
+    <div class="grid grid-cols-2 gap-3">
+      <div class="stat"><p class="sub">追蹤中</p><p class="mt-1 text-2xl font-bold" x-text="count('追蹤中')"></p></div>
+      <div class="stat"><p class="sub">勝率（報酬 &gt; 0）</p><p class="mt-1 text-2xl font-bold" x-text="all.win == null ? '—' : all.win.toFixed(0) + '%'"></p></div>
+      <div class="stat"><p class="sub">平均報酬</p><p class="mt-1 text-2xl font-bold" :class="cls(all.avg)" x-text="pct(all.avg)"></p></div>
+      <div class="stat"><p class="sub">平均超額（vs 大盤）</p><p class="mt-1 text-2xl font-bold" :class="cls(all.ex)" x-text="pct(all.ex)"></p></div>
     </div>
-    <div class="rounded-xl border bg-white p-5">
-      <h2 class="font-bold">狀態分布</h2>
-      <div class="mt-3 flex flex-wrap gap-2 text-sm">
-        <template x-for="s in statuses" :key="s"><span class="rounded-full bg-slate-100 px-3 py-1"><span x-text="s"></span>：<b x-text="count(s)"></b></span></template>
+
+    <div class="card" x-show="alerts.length">
+      <h2 class="font-bold">需要注意</h2>
+      <ul class="mt-2 divide-y divide-slate-100 text-sm dark:divide-slate-800">
+        <template x-for="a in alerts" :key="a.t.id">
+          <li class="flex items-center justify-between gap-2 py-2">
+            <span x-text="a.t.code + ' ' + a.t.name"></span>
+            <span class="sub" x-text="a.text"></span>
+          </li>
+        </template>
+      </ul>
+    </div>
+
+    <div>
+      <h2 class="mb-2 font-bold" x-text="'今日新推薦（' + (state.lastDate || '—') + '）'"></h2>
+      <div class="space-y-3">
+        <template x-for="r in latestRecs" :key="r.id">
+          <article class="card">
+            <div class="flex items-start justify-between gap-3">
+              <h3 class="text-lg font-bold" x-text="r.code + ' ' + r.name"></h3>
+              <span class="rounded-lg bg-indigo-50 px-3 py-1 text-sm font-bold text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300" x-text="r.score + ' 分'"></span>
+            </div>
+            <p class="mt-2 text-sm">參考價 <b x-text="money(r.price)"></b>
+              <template x-if="trackOf(r.id)"><span class="sub">　停損 <span x-text="trackOf(r.id).stop"></span>／目標 <span x-text="trackOf(r.id).target"></span></span></template>
+            </p>
+            <p class="mt-1 break-words text-sm text-slate-600 dark:text-slate-300" x-text="r.reason"></p>
+            <div class="mt-3 flex gap-2">
+              <a :href="yahoo(r.code)" target="_blank" rel="noopener noreferrer" class="btn">Yahoo 股市</a>
+              <a :href="goodinfo(r.code)" target="_blank" rel="noopener noreferrer" class="btn">Goodinfo</a>
+            </div>
+          </article>
+        </template>
       </div>
-    </div>
-    <div class="rounded-xl border bg-white p-5 text-sm text-slate-600">
-      <h2 class="font-bold text-slate-800">推薦規則（每個交易日收盤後自動執行）</h2>
-      <p class="mt-2">評分達 <b x-text="state.params?.threshold ?? 70"></b> 分才推薦：站上月均價且未過熱、當日溫和上漲、量能放大、成交值前 100 名。停損 −7%、目標 +15%、最長追蹤 <span x-text="state.params?.maxDays ?? 20"></span> 個交易日。</p>
-      <p class="mt-2 text-xs text-slate-400">這是量化規則篩選，不是投資建議，也不保證獲利。台股慣例：紅色上漲、綠色下跌。</p>
+      <p x-show="latestRecs.length === 0" class="card text-sm text-slate-500 dark:text-slate-400">這個交易日沒有符合條件的標的，這是正常的，不是每天都有。</p>
     </div>
   </section>
 
-  <!-- 最新推薦 -->
-  <section x-show="tab === 'today' && !error" class="space-y-4">
-    <h2 class="text-xl font-bold" x-text="'最新交易日 ' + (state.lastDate || '—') + ' 的推薦'"></h2>
-    <div class="grid gap-4 md:grid-cols-2">
-      <template x-for="r in latestRecs" :key="r.id">
-        <article class="rounded-2xl border bg-white p-5 shadow-sm">
-          <div class="flex items-start justify-between gap-3">
-            <h3 class="text-lg font-bold" x-text="r.code + ' ' + r.name"></h3>
-            <span class="rounded-lg bg-indigo-50 px-3 py-1 font-bold text-indigo-700" x-text="r.score + '/100'"></span>
-          </div>
-          <p class="mt-2 text-sm">參考價：<b x-text="money(r.price)"></b></p>
-          <p class="mt-1 break-words text-sm">理由：<span x-text="r.reason"></span></p>
-          <p class="mt-1 break-words text-sm text-red-600" x-text="r.risk"></p>
-        </article>
-      </template>
-    </div>
-    <p x-show="latestRecs.length === 0" class="text-sm text-slate-500">這個交易日沒有符合條件的標的。</p>
-  </section>
-
-  <!-- 追蹤與歷史 -->
-  <section x-show="tab === 'history' && !error" class="space-y-4">
-    <div class="flex flex-wrap items-center gap-2">
-      <h2 class="mr-auto text-xl font-bold">推薦歷史與追蹤更新</h2>
-      <select x-model="filter" class="rounded-lg border bg-white px-3 py-2 text-sm" aria-label="狀態篩選">
+  <!-- ===== 追蹤 ===== -->
+  <section x-show="tab === 'track' && !error" class="space-y-3">
+    <div class="flex gap-2">
+      <select x-model="filter" class="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-900" aria-label="狀態篩選">
         <option value="">全部狀態</option>
         <template x-for="s in statuses" :key="s"><option :value="s" x-text="s"></option></template>
       </select>
+      <select x-model="sort" class="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-900" aria-label="排序">
+        <option value="new">最新推薦</option>
+        <option value="ret">報酬由高到低</option>
+        <option value="stop">最接近停損</option>
+      </select>
     </div>
-    <template x-for="t in filteredTracking" :key="t.id">
-      <article class="space-y-3 rounded-2xl border bg-white p-5 shadow-sm">
-        <div class="flex flex-wrap items-start justify-between gap-2">
+
+    <template x-for="t in trackingList" :key="t.id">
+      <article class="card space-y-3">
+        <div class="flex items-start justify-between gap-2">
           <div>
             <h3 class="font-bold" x-text="t.code + ' ' + t.name"></h3>
-            <p class="text-xs text-slate-500" x-text="'推薦日 ' + t.date + '・已追蹤 ' + t.snapshots.length + ' 個交易日'"></p>
+            <p class="sub" x-text="'推薦 ' + t.date + '・第 ' + t.snapshots.length + ' 個交易日・評分 ' + (scoreOf(t) ?? '—')"></p>
           </div>
-          <span class="rounded-full bg-slate-100 px-3 py-1 text-xs" x-text="t.status"></span>
+          <span class="chip" x-text="statusIcon(t.status) + ' ' + t.status"></span>
         </div>
-        <div class="grid grid-cols-2 gap-2 text-sm md:grid-cols-5">
-          <div><p class="text-xs text-slate-500">參考價</p><p class="font-bold" x-text="money(t.basePrice)"></p></div>
-          <div><p class="text-xs text-slate-500">最新價</p><p class="font-bold" x-text="latest(t) == null ? '尚無資料' : money(latest(t))"></p></div>
-          <div><p class="text-xs text-slate-500">報酬率</p><p class="font-bold" :class="cls(ret(t))" x-text="pct(ret(t))"></p></div>
-          <div><p class="text-xs text-slate-500">停損</p><p class="font-bold" x-text="money(t.stop)"></p></div>
-          <div><p class="text-xs text-slate-500">目標</p><p class="font-bold" x-text="money(t.target)"></p></div>
+
+        <div class="flex items-end justify-between gap-3">
+          <div class="grid flex-1 grid-cols-3 gap-2 text-sm">
+            <div><p class="sub">最新價</p><p class="font-bold" x-text="latest(t) == null ? '尚無' : money(latest(t))"></p></div>
+            <div><p class="sub">報酬</p><p class="font-bold" :class="cls(ret(t))" x-text="pct(ret(t))"></p></div>
+            <div><p class="sub">vs 大盤</p><p class="font-bold" :class="cls(excess(t))" x-text="pct(excess(t))"></p></div>
+          </div>
+          <svg viewBox="0 0 100 28" class="h-7 w-24 shrink-0" aria-hidden="true">
+            <path :d="spark(t)" fill="none" :stroke="sparkColor(t)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+          </svg>
         </div>
+
+        <div>
+          <div class="relative h-2 rounded-full bg-slate-200 dark:bg-slate-700">
+            <div class="absolute top-[-2px] h-3 w-0.5 bg-slate-500" :style="'left:' + basePos(t) + '%'" title="推薦價"></div>
+            <div class="absolute top-[-3px] h-3.5 w-3.5 -translate-x-1/2 rounded-full border-2 border-white dark:border-slate-900"
+                 :class="dotColor(t)" :style="'left:' + curPos(t) + '%'"></div>
+          </div>
+          <div class="sub mt-1 flex justify-between"><span x-text="'停損 ' + t.stop"></span><span>▏推薦價 <span x-text="t.basePrice"></span></span><span x-text="'目標 ' + t.target"></span></div>
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+          <a :href="yahoo(t.code)" target="_blank" rel="noopener noreferrer" class="btn">Yahoo 股市</a>
+          <a :href="goodinfo(t.code)" target="_blank" rel="noopener noreferrer" class="btn">Goodinfo</a>
+        </div>
+
         <details x-show="t.snapshots.length">
-          <summary class="cursor-pointer text-xs text-indigo-700">查看價格快照</summary>
+          <summary class="cursor-pointer text-xs text-indigo-600 dark:text-indigo-400">價格快照</summary>
           <div class="mt-2 overflow-x-auto">
             <table class="w-full text-left text-xs">
-              <thead class="text-slate-500"><tr><th class="py-1 pr-4">日期</th><th class="py-1 pr-4">收盤價</th><th class="py-1">報酬率</th></tr></thead>
+              <thead class="sub"><tr><th class="py-1 pr-4">日期</th><th class="py-1 pr-4">收盤</th><th class="py-1">報酬</th></tr></thead>
               <tbody>
                 <template x-for="s in [...t.snapshots].reverse()" :key="s.date">
-                  <tr class="border-t"><td class="py-1 pr-4" x-text="s.date"></td><td class="py-1 pr-4" x-text="money(s.price)"></td>
+                  <tr class="border-t border-slate-100 dark:border-slate-800"><td class="py-1 pr-4" x-text="s.date"></td><td class="py-1 pr-4" x-text="money(s.price)"></td>
                   <td class="py-1" :class="cls(calc(t.basePrice, s.price))" x-text="pct(calc(t.basePrice, s.price))"></td></tr>
                 </template>
               </tbody>
@@ -115,48 +170,198 @@
         </details>
       </article>
     </template>
-    <p x-show="filteredTracking.length === 0" class="text-sm text-slate-500">沒有符合的紀錄。</p>
+    <p x-show="trackingList.length === 0" class="card text-sm text-slate-500 dark:text-slate-400">沒有符合的紀錄。</p>
+  </section>
+
+  <!-- ===== 績效驗證 ===== -->
+  <section x-show="tab === 'perf' && !error" class="space-y-4">
+    <div class="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" x-show="all.n < 30">
+      目前只有 <b x-text="all.n"></b> 筆有報價的紀錄，樣本太少，勝率和平均報酬很可能只是運氣。建議累積至少 30 筆、橫跨不同行情再判斷這套規則有沒有用。
+    </div>
+
+    <div class="card">
+      <h2 class="font-bold">規則表現</h2>
+      <p class="sub mt-1">報酬 = 目前（或結案時）收盤價相對推薦價；大盤 = 流動性足夠上市股票的等權重平均。超額報酬大於 0，才代表贏過大盤。</p>
+      <div class="mt-3 overflow-x-auto">
+        <table class="w-full min-w-[420px] text-left text-sm">
+          <thead class="sub"><tr><th class="py-1 pr-3">分組</th><th class="py-1 pr-3">筆數</th><th class="py-1 pr-3">勝率</th><th class="py-1 pr-3">平均報酬</th><th class="py-1">平均超額</th></tr></thead>
+          <tbody>
+            <template x-for="r in perfRows" :key="r.label">
+              <tr class="border-t border-slate-100 dark:border-slate-800">
+                <td class="py-2 pr-3 font-medium" x-text="r.label"></td>
+                <td class="py-2 pr-3" x-text="r.n"></td>
+                <td class="py-2 pr-3" x-text="r.win == null ? '—' : r.win.toFixed(0) + '%'"></td>
+                <td class="py-2 pr-3" :class="cls(r.avg)" x-text="pct(r.avg)"></td>
+                <td class="py-2" :class="cls(r.ex)" x-text="pct(r.ex)"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card text-sm">
+      <h2 class="font-bold">結案結果</h2>
+      <div class="mt-2 flex flex-wrap gap-2">
+        <template x-for="s in statuses" :key="s"><span class="chip"><span x-text="statusIcon(s) + ' ' + s"></span>：<b x-text="count(s)"></b></span></template>
+      </div>
+      <p class="sub mt-3">全部紀錄平均報酬扣除估計交易成本（買賣手續費加證交稅，約 0.6%）：
+        <b :class="cls(all.avg == null ? null : all.avg - 0.6)" x-text="pct(all.avg == null ? null : all.avg - 0.6)"></b></p>
+      <p class="sub mt-1">最佳 <span :class="cls(all.best)" x-text="pct(all.best)"></span>　最差 <span :class="cls(all.worst)" x-text="pct(all.worst)"></span></p>
+    </div>
+    <p class="sub">同一檔股票的推薦彼此不獨立，且推薦日價格是當日收盤價，實際無法剛好買在這個價位，真實績效通常會更差。</p>
+  </section>
+
+  <!-- ===== 說明 ===== -->
+  <section x-show="tab === 'about'" class="space-y-4 text-sm">
+    <div class="card">
+      <h2 class="font-bold">推薦規則（每個交易日收盤後自動執行）</h2>
+      <p class="mt-2 text-slate-600 dark:text-slate-300">評分達 <b x-text="state.params?.threshold ?? 70"></b> 分才推薦：站上月均價且未過熱（30）、當日溫和上漲（20）、量能放大（30）、成交值前 100 名（20）。停損 −7%、目標 +15%、最長追蹤 <span x-text="state.params?.maxDays ?? 20"></span> 個交易日。</p>
+      <p class="sub mt-2">這是量化規則篩選，不是投資建議，也不保證獲利。台股慣例：紅色上漲、綠色下跌。</p>
+    </div>
+    <div class="card">
+      <h2 class="font-bold">加到手機主畫面</h2>
+      <p class="mt-2 text-slate-600 dark:text-slate-300">iPhone：用 Safari 開這個網址，點下方的分享按鈕，選「加入主畫面」。之後就能像 App 一樣全螢幕開啟。Android：Chrome 右上選單 →「加到主畫面」。</p>
+    </div>
+    <div class="card">
+      <h2 class="font-bold">名詞</h2>
+      <ul class="mt-2 list-disc space-y-1 pl-5 text-slate-600 dark:text-slate-300">
+        <li>超額報酬：這檔的報酬減去同期大盤報酬，大於 0 才算贏過大盤。</li>
+        <li>進度條：左端是停損價、右端是目標價，圓點是最新收盤價，細線是推薦價。</li>
+        <li>快觸及停損：最新價距離停損價不到 3%。</li>
+      </ul>
+    </div>
   </section>
 </main>
+
+<nav class="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white/95 backdrop-blur dark:border-slate-700 dark:bg-slate-900/95" style="padding-bottom: env(safe-area-inset-bottom, 0px)">
+  <div class="mx-auto grid max-w-3xl grid-cols-4">
+    <template x-for="tb in tabs" :key="tb.id">
+      <button type="button" @click="go(tb.id)" class="flex flex-col items-center gap-0.5 py-2 text-xs"
+        :class="tab === tb.id ? 'font-bold text-indigo-600 dark:text-indigo-400' : 'text-slate-500 dark:text-slate-400'"
+        :aria-current="tab === tb.id ? 'page' : null">
+        <span class="text-lg leading-none" x-text="tb.icon"></span><span x-text="tb.label"></span>
+      </button>
+    </template>
+  </div>
+</nav>
 
 <script>
 function app() {
   return {
-    tabs: [{ id: 'overview', label: '總覽' }, { id: 'today', label: '最新推薦' }, { id: 'history', label: '追蹤與歷史' }],
+    tabs: [
+      { id: 'home', label: '首頁', icon: '🏠' }, { id: 'track', label: '追蹤', icon: '📈' },
+      { id: 'perf', label: '績效', icon: '🧪' }, { id: 'about', label: '說明', icon: 'ℹ️' }
+    ],
     statuses: ['追蹤中', '已達標', '已失效', '已結案'],
-    tab: 'overview', filter: '', error: '',
-    state: { recommendations: [], tracking: [], lastDate: null, updatedAt: null },
+    tab: 'home', filter: '', sort: 'new', error: '', loading: false,
+    state: { recommendations: [], tracking: [], market: [], lastDate: null, updatedAt: null },
 
-    init() { this.load(); },
+    init() {
+      const h = location.hash.replace('#', '');
+      if (this.tabs.some(t => t.id === h)) this.tab = h;
+      this.load();
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) this.load(); });
+    },
+    go(id) { this.tab = id; history.replaceState(null, '', '#' + id); window.scrollTo({ top: 0 }); },
+    toggleTheme() {
+      const dark = document.documentElement.classList.toggle('dark');
+      try { localStorage.setItem('theme', dark ? 'dark' : 'light'); } catch (e) {}
+    },
     async load() {
-      this.error = '';
+      this.loading = true; this.error = '';
       try {
-        const res = await fetch('data/state.json', { cache: 'no-store' });
+        const res = await fetch('data/state.json?t=' + Date.now(), { cache: 'no-store' });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const d = await res.json();
-        d.recommendations ||= []; d.tracking ||= [];
+        d.recommendations ||= []; d.tracking ||= []; d.market ||= [];
         this.state = d;
       } catch (e) {
-        this.error = '讀不到 data/state.json。請透過 GitHub Pages 網址開啟（直接開本機檔案無法讀取），並確認每日排程已至少成功執行一次。';
+        this.error = '讀不到 data/state.json。請透過 GitHub Pages 網址開啟，並確認每日排程已至少成功執行一次。';
       }
+      this.loading = false;
     },
 
+    /* ---- 衍生資料 ---- */
     get updatedText() { return this.state.updatedAt ? '最後更新 ' + this.state.updatedAt.replace('T', ' ').slice(0, 16) : '尚未更新'; },
+    get staleDays() { return this.state.lastDate ? Math.floor((Date.now() - new Date(this.state.lastDate + 'T00:00:00+08:00')) / 86400000) : 0; },
     get latestRecs() { return this.state.recommendations.filter(r => r.date === this.state.lastDate); },
-    get filteredTracking() {
-      return [...this.state.tracking].filter(t => !this.filter || t.status === this.filter).sort((a, b) => b.date.localeCompare(a.date));
-    },
     get measured() { return this.state.tracking.filter(t => t.snapshots.length); },
-    get avgRet() { const m = this.measured; return m.length ? m.reduce((s, t) => s + this.ret(t), 0) / m.length : null; },
-    get winRate() { const m = this.measured; return m.length ? Math.round(m.filter(t => this.ret(t) > 0).length / m.length * 100) + '%' : '—'; },
-
+    get all() { return this.stat(this.measured); },
+    get alerts() {
+      const out = [];
+      for (const t of this.state.tracking) {
+        const last = t.snapshots[t.snapshots.length - 1];
+        if (t.status === '追蹤中') {
+          const d = this.distStop(t);
+          if (d != null && d <= 3) out.push({ t, text: '⚠️ 距停損僅 ' + d.toFixed(1) + '%' });
+        } else if (last && last.date === this.state.lastDate) {
+          out.push({ t, text: this.statusIcon(t.status) + ' 今日' + t.status });
+        }
+      }
+      return out;
+    },
+    get trackingList() {
+      const l = this.state.tracking.filter(t => !this.filter || t.status === this.filter);
+      if (this.sort === 'ret') return [...l].sort((a, b) => (this.ret(b) ?? -999) - (this.ret(a) ?? -999));
+      if (this.sort === 'stop') return [...l].sort((a, b) => (this.distStop(a) ?? 999) - (this.distStop(b) ?? 999));
+      return [...l].sort((a, b) => b.date.localeCompare(a.date));
+    },
+    get perfRows() {
+      const m = this.measured;
+      const b = (lo, hi) => m.filter(t => { const s = this.scoreOf(t); return s != null && s >= lo && s <= hi; });
+      return [
+        { label: '全部', ...this.stat(m) },
+        { label: '評分 70–79', ...this.stat(b(70, 79)) },
+        { label: '評分 80–99', ...this.stat(b(80, 99)) },
+        { label: '評分 100', ...this.stat(b(100, 100)) }
+      ];
+    },
+    stat(list) {
+      const r = list.map(t => this.ret(t)).filter(v => v != null);
+      const ex = list.map(t => this.excess(t)).filter(v => v != null);
+      const avg = a => a.length ? a.reduce((s, v) => s + v, 0) / a.length : null;
+      return {
+        n: r.length, win: r.length ? r.filter(v => v > 0).length / r.length * 100 : null,
+        avg: avg(r), ex: avg(ex), best: r.length ? Math.max(...r) : null, worst: r.length ? Math.min(...r) : null
+      };
+    },
     count(s) { return this.state.tracking.filter(t => t.status === s).length; },
+    trackOf(recId) { return this.state.tracking.find(t => t.recId === recId); },
+    scoreOf(t) { const r = this.state.recommendations.find(x => x.id === t.recId); return r ? r.score : null; },
+
+    /* ---- 報酬與基準 ---- */
     latest(t) { return t.snapshots.length ? t.snapshots[t.snapshots.length - 1].price : null; },
     calc(base, p) { return base > 0 && p != null ? (p / base - 1) * 100 : null; },
     ret(t) { return this.calc(t.basePrice, this.latest(t)); },
+    mktAt(date) { const m = this.state.market.find(x => x.date === date); return m ? m.idx : null; },
+    excess(t) {
+      const r = this.ret(t); if (r == null) return null;
+      const m0 = this.mktAt(t.date), m1 = this.mktAt(t.snapshots[t.snapshots.length - 1].date);
+      return m0 && m1 ? r - (m1 / m0 - 1) * 100 : null;
+    },
+    distStop(t) { const p = this.latest(t); return p != null && t.stop > 0 ? (p / t.stop - 1) * 100 : null; },
+
+    /* ---- 圖形 ---- */
+    spark(t) {
+      const pts = [t.basePrice, ...t.snapshots.map(s => s.price)];
+      if (pts.length < 2) return '';
+      const lo = Math.min(...pts), hi = Math.max(...pts), span = hi - lo || 1;
+      return pts.map((p, i) => (i ? 'L' : 'M') + (i / (pts.length - 1) * 100).toFixed(1) + ',' + (26 - (p - lo) / span * 24).toFixed(1)).join(' ');
+    },
+    sparkColor(t) { const r = this.ret(t); return r == null || r === 0 ? '#94a3b8' : r > 0 ? '#ef4444' : '#22c55e'; },
+    pos(t, p) { const span = t.target - t.stop; return span > 0 ? Math.max(0, Math.min(100, (p - t.stop) / span * 100)).toFixed(1) : 0; },
+    basePos(t) { return this.pos(t, t.basePrice); },
+    curPos(t) { const p = this.latest(t); return this.pos(t, p == null ? t.basePrice : p); },
+    dotColor(t) { const r = this.ret(t); return r == null || r === 0 ? 'bg-slate-400' : r > 0 ? 'bg-red-500' : 'bg-green-500'; },
+
+    /* ---- 格式化與連結 ---- */
+    statusIcon(s) { return { '追蹤中': '👀', '已達標': '🎯', '已失效': '⛔', '已結案': '✅' }[s] || ''; },
+    yahoo(code) { return 'https://tw.stock.yahoo.com/quote/' + encodeURIComponent(code) + '.TW'; },
+    goodinfo(code) { return 'https://goodinfo.tw/tw/StockDetail.asp?STOCK_ID=' + encodeURIComponent(code); },
     money(v) { return v == null ? '—' : 'NT$ ' + Number(v).toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); },
     pct(v) { return v == null ? '—' : (v > 0 ? '+' : '') + v.toFixed(2) + '%'; },
-    cls(v) { return v == null ? 'text-slate-400' : v > 0 ? 'text-red-600' : v < 0 ? 'text-green-600' : 'text-slate-800'; }
+    cls(v) { return v == null ? 'text-slate-400' : v > 0 ? 'text-red-600 dark:text-red-400' : v < 0 ? 'text-green-600 dark:text-green-400' : ''; }
   };
 }
 </script>
