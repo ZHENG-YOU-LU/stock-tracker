@@ -118,7 +118,9 @@ def cmd_refresh():
     LIVE_F.write_text(json.dumps({
         "updatedAt": datetime.now(TZ).isoformat(timespec="seconds"), "quotes": got,
     }, ensure_ascii=False), encoding="utf-8")
-    return f"已更新 {len(got)}／{len(codes)} 檔的即時價"
+    ny = sum(1 for v in got.values() if v.get("src") == "yahoo")
+    tail = f"（其中 {ny} 檔來自 Yahoo，可能延遲約 20 分鐘）" if ny else ""
+    return f"已更新 {len(got)}／{len(codes)} 檔的報價{tail}"
 
 
 def main():
