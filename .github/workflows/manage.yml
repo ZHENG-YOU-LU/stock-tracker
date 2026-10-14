@@ -50,7 +50,6 @@ jobs:
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
         run: |
-          if [ "$ACTION" = "refresh" ]; then python3 scripts/update.py || true; fi
           python3 scripts/manage.py
 
       - name: Commit data
