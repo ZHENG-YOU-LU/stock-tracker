@@ -9,7 +9,6 @@ import smtplib
 import ssl
 import sys
 import time
-import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
@@ -112,19 +111,6 @@ def send_mail(subject, body):
         s.login(user, pw)
         s.send_message(msg)
     print("已寄出通知")
-
-
-def send_telegram(text):
-    token = os.environ.get("TELEGRAM_TOKEN")
-    chat = os.environ.get("TELEGRAM_CHAT_ID")
-    if not (token and chat):
-        print("未設定 TELEGRAM_TOKEN / TELEGRAM_CHAT_ID，略過 Telegram")
-        return
-    data = urllib.parse.urlencode({"chat_id": chat, "text": text[:4000]}).encode()
-    req = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendMessage", data=data)
-    with urllib.request.urlopen(req, timeout=30) as r:
-        r.read()
-    print("已送出 Telegram 通知")
 
 
 def main():
@@ -252,11 +238,10 @@ def main():
         parts.append("本信由量化規則自動產生，僅供個人研究紀錄，不構成投資建議。")
         subject = f"[台股追蹤] {date} 新推薦 {len(new_lines)} 檔／狀態變動 {len(events)} 項"
         body = "\n".join(parts)
-        for fn, args in ((send_mail, (subject, body)), (send_telegram, (subject + "\n\n" + body,))):
-            try:
-                fn(*args)
-            except Exception as e:
-                print(f"::warning::通知失敗（{fn.__name__}）：{e}")
+        try:
+            send_mail(subject, body)
+        except Exception as e:
+            print(f"::warning::寄信失敗：{e}")
 
 
 if __name__ == "__main__":
