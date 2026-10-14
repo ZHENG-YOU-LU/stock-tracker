@@ -84,19 +84,27 @@
       </ul>
     </div>
 
+    <div class="card" x-show="industryDist.length">
+      <h2 class="font-bold">追蹤中的產業分布</h2>
+      <div class="mt-2 flex flex-wrap gap-2 text-sm">
+        <template x-for="d in industryDist" :key="d.name"><span class="chip"><span x-text="d.name"></span>：<b x-text="d.n"></b></span></template>
+      </div>
+      <p class="sub mt-2" x-show="industryDist[0] && industryDist[0].name !== '未分類' && industryDist[0].pct >= 40 && industryDist[0].n >= 3">⚠️ 「<span x-text="industryDist[0].name"></span>」佔比偏高，產業集中風險較大。</p>
+    </div>
+
     <div>
       <h2 class="mb-2 font-bold" x-text="'今日新推薦（' + (state.lastDate || '—') + '）'"></h2>
       <div class="space-y-3">
         <template x-for="r in latestRecs" :key="r.id">
           <article class="card">
             <div class="flex items-start justify-between gap-3">
-              <h3 class="text-lg font-bold" x-text="r.code + ' ' + r.name"></h3>
-              <span class="rounded-lg bg-indigo-50 px-3 py-1 text-sm font-bold text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300" x-text="r.score + ' 分'"></span>
+              <div><h3 class="text-lg font-bold" x-text="r.code + ' ' + r.name"></h3><p class="sub" x-show="r.industry" x-text="r.industry"></p></div>
+              <span class="rounded-lg bg-indigo-50 px-3 py-1 text-sm font-bold text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300" x-text="Math.round(r.score) + ' 分'"></span>
             </div>
             <p class="mt-2 text-sm">參考價 <b x-text="money(r.price)"></b>
               <template x-if="trackOf(r.id)"><span class="sub">　停損 <span x-text="trackOf(r.id).stop"></span>／目標 <span x-text="trackOf(r.id).target"></span></span></template>
             </p>
-            <p class="mt-1 break-words text-sm text-slate-600 dark:text-slate-300" x-text="r.reason"></p>
+            <p class="mt-1 whitespace-pre-line break-words text-sm text-slate-600 dark:text-slate-300" x-text="r.reason"></p>
             <div class="mt-3 flex gap-2">
               <a :href="yahoo(r.code)" target="_blank" rel="noopener noreferrer" class="btn">Yahoo 股市</a>
               <a :href="goodinfo(r.code)" target="_blank" rel="noopener noreferrer" class="btn">Goodinfo</a>
@@ -155,7 +163,7 @@
         <div class="flex items-start justify-between gap-2">
           <div>
             <h3 class="font-bold" x-text="t.code + ' ' + t.name"></h3>
-            <p class="sub" x-text="'推薦 ' + t.date + '・第 ' + t.snapshots.length + ' 個交易日・' + (t.source === 'manual' ? '自選' : '評分 ' + (scoreOf(t) ?? '—'))"></p>
+            <p class="sub" x-text="'推薦 ' + t.date + '・第 ' + t.snapshots.length + ' 個交易日・' + (t.source === 'manual' ? '自選' : '評分 ' + (scoreOf(t) == null ? '—' : Math.round(scoreOf(t)))) + (industryOf(t) ? '・' + industryOf(t) : '')"></p>
           </div>
           <span class="chip" x-text="statusIcon(t.status) + ' ' + t.status"></span>
         </div>
@@ -250,7 +258,7 @@
   <section x-show="tab === 'about'" class="space-y-4 text-sm">
     <div class="card">
       <h2 class="font-bold">推薦規則（每個交易日收盤後自動執行）</h2>
-      <p class="mt-2 text-slate-600 dark:text-slate-300">評分達 <b x-text="state.params?.threshold ?? 70"></b> 分才推薦：站上月均價且未過熱（30）、當日溫和上漲（20）、量能放大（30）、成交值前 100 名（20）。停損 −7%、目標 +15%、最長追蹤 <span x-text="state.params?.maxDays ?? 20"></span> 個交易日。</p>
+      <p class="mt-2 text-slate-600 dark:text-slate-300">評分為 0–100 的連續分數，達 <b x-text="state.params?.threshold ?? 70"></b> 分才推薦：趨勢 30（站上月均價、過熱會扣分）、當日動能 20（漲 2.5% 最高）、量能 30（為近 5 日均量 2 倍滿分）、流動性 20（成交值排名越前越高）。量能歷史不足 3 天時不計入，其餘按比例換算。每天最多 <span x-text="state.params?.maxNew ?? 5"></span> 檔，同一產業最多 <span x-text="state.params?.maxPerIndustry ?? 2"></span> 檔。停損 −7%、目標 +15%、最長追蹤 <span x-text="state.params?.maxDays ?? 20"></span> 個交易日。</p>
       <p class="sub mt-2">這是量化規則篩選，不是投資建議，也不保證獲利。台股慣例：紅色上漲、綠色下跌。</p>
     </div>
     <div class="card">
@@ -417,6 +425,12 @@ function app() {
     get measured() { return this.state.tracking.filter(t => t.snapshots.length && t.source !== 'manual'); },
     get manualMeasured() { return this.state.tracking.filter(t => t.snapshots.length && t.source === 'manual'); },
     get all() { return this.stat(this.measured); },
+    get industryDist() {
+      const act = this.state.tracking.filter(t => t.status === '追蹤中');
+      const c = {};
+      for (const t of act) { const k = this.industryOf(t) || '未分類'; c[k] = (c[k] || 0) + 1; }
+      return Object.entries(c).sort((a, b) => b[1] - a[1]).map(([name, n]) => ({ name, n, pct: act.length ? n / act.length * 100 : 0 }));
+    },
     get alerts() {
       const out = [];
       for (const t of this.state.tracking) {
@@ -438,12 +452,12 @@ function app() {
     },
     get perfRows() {
       const m = this.measured;
-      const b = (lo, hi) => m.filter(t => { const s = this.scoreOf(t); return s != null && s >= lo && s <= hi; });
+      const b = (lo, hi) => m.filter(t => { const r = this.recOf(t); return r && r.scoreVer === 2 && r.score >= lo && r.score < hi; });
       return [
         { label: '全部', ...this.stat(m) },
-        { label: '評分 70–79', ...this.stat(b(70, 79)) },
-        { label: '評分 80–99', ...this.stat(b(80, 99)) },
-        { label: '評分 100', ...this.stat(b(100, 100)) },
+        { label: '評分 70–74（新版）', ...this.stat(b(70, 75)) },
+        { label: '評分 75–79（新版）', ...this.stat(b(75, 80)) },
+        { label: '評分 80 以上（新版）', ...this.stat(b(80, 101)) },
         { label: '自選股（非規則）', ...this.stat(this.manualMeasured) }
       ];
     },
@@ -458,6 +472,8 @@ function app() {
     },
     count(s) { return this.state.tracking.filter(t => t.status === s).length; },
     trackOf(recId) { return this.state.tracking.find(t => t.recId === recId); },
+    recOf(t) { return this.state.recommendations.find(x => x.id === t.recId) || null; },
+    industryOf(t) { const r = this.recOf(t); return r ? r.industry || '' : ''; },
     scoreOf(t) { const r = this.state.recommendations.find(x => x.id === t.recId); return r ? r.score : null; },
 
     /* ---- 報酬與基準 ---- */
