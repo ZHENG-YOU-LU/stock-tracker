@@ -171,7 +171,7 @@
           </svg>
         </div>
 
-        <p class="sub" x-show="liveOf(t)">⚡ 即時 <b x-text="money(liveOf(t)?.price)"></b>（今日 <span :class="cls(liveDay(t))" x-text="pct(liveDay(t))"></span>）・<span x-text="liveAt()"></span></p>
+        <p class="sub" x-show="liveOf(t)">⚡ 即時 <b x-text="money(liveOf(t)?.price)"></b>（今日 <span :class="cls(liveDay(t))" x-text="pct(liveDay(t))"></span>）・<span x-text="liveAt()"></span><span x-show="liveOf(t)?.src === 'yahoo'">・延遲報價</span></p>
 
         <div>
           <div class="relative h-2 rounded-full bg-slate-200 dark:bg-slate-700">
@@ -259,7 +259,7 @@
     </div>
     <div class="card">
       <h2 class="font-bold">兩個更新按鈕差在哪</h2>
-      <p class="mt-2 text-slate-600 dark:text-slate-300"><b>重新整理</b>：只是重新讀取網頁上已有的資料。<b>⚡ 立即更新</b>：叫雲端現在跑一次，盤中會抓最新即時價，收盤後有新資料也會一併處理，約需 30～90 秒。需要先完成權杖設定。</p>
+      <p class="mt-2 text-slate-600 dark:text-slate-300"><b>重新整理</b>：只是重新讀取網頁上已有的資料。<b>⚡ 立即更新</b>：叫雲端現在跑一次，盤中會抓最新報價（證交所為主，失敗時用 Yahoo 補，可能延遲約 20 分鐘），約需 30～60 秒。需要先完成權杖設定。</p>
       <p class="sub mt-2">收盤價每個交易日只更新一次；即時價是盤中的報價，只在你按下立即更新時才會刷新。</p>
     </div>
     <div class="card">
