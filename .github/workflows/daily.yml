@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: daily-update
+  group: data-writes
   cancel-in-progress: false
 
 jobs:
@@ -30,6 +30,8 @@ jobs:
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
       - name: Commit data
         run: |
