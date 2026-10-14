@@ -71,7 +71,7 @@ def cmd_add(code, cost_text, note):
     rid = f"{date}-{code}-m{int(time.time())}"
     reason = "手動加入自選" + (f"：{note}" if note else "") + (f"（成本價 {base}）" if cost else "（以最近收盤價為起點）")
     state["recommendations"].append({
-        "id": rid, "code": code, "name": name, "industry": "", "date": date, "price": base, "score": None,
+        "id": rid, "code": code, "name": name, "industry": update.fetch_industries().get(code, ""), "date": date, "price": base, "score": None,
         "reason": reason, "source": "manual",
         "risk": f"收盤跌破 {stop}（-7%）視為失效；追蹤滿 {update.MAX_DAYS} 個交易日自動結案。",
     })
