@@ -1,0 +1,62 @@
+name: manage
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "add / remove / refresh"
+        required: true
+        default: "refresh"
+      code:
+        description: "股票代號（add、remove 用）"
+        required: false
+        default: ""
+      cost:
+        description: "成本價（選填）"
+        required: false
+        default: ""
+      note:
+        description: "備註（選填）"
+        required: false
+        default: ""
+      nonce:
+        description: "網頁用來辨識這次執行"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: data-writes
+  cancel-in-progress: false
+
+jobs:
+  manage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run action
+        env:
+          ACTION: ${{ inputs.action }}
+          CODE: ${{ inputs.code }}
+          COST: ${{ inputs.cost }}
+          NOTE: ${{ inputs.note }}
+          NONCE: ${{ inputs.nonce }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+        run: |
+          if [ "$ACTION" = "refresh" ]; then python3 scripts/update.py || true; fi
+          python3 scripts/manage.py
+
+      - name: Commit data
+        if: always()
+        run: |
+          git config user.name "stock-bot"
+          git config user.email "stock-bot@users.noreply.github.com"
+          git add data
+          git diff --cached --quiet || (git commit -m "manage: ${{ inputs.action }}" && git pull --rebase && git push)
