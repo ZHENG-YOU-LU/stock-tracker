@@ -77,6 +77,10 @@
       <span x-text="regime.text"></span>
     </div>
 
+    <div class="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" x-show="state.industryError">
+      ⚠️ 產業資料取得失敗，舊紀錄暫時無法補上產業：<span x-text="state.industryError"></span>
+    </div>
+
     <div class="card" x-show="alerts.length">
       <h2 class="font-bold">需要注意</h2>
       <ul class="mt-2 divide-y divide-slate-100 text-sm dark:divide-slate-800">
@@ -98,31 +102,47 @@
     </div>
 
     <div>
-      <h2 class="mb-2 font-bold" x-text="'今日新推薦（' + (state.lastDate || '—') + '）'"></h2>
+      <h2 class="font-bold" x-text="'明日買進計畫（依 ' + (state.lastDate || '—') + ' 收盤）'"></h2>
+      <p class="sub mb-2 mt-1">收盤後算出，沒辦法預測明天開盤價，下面是「開在什麼價位該怎麼做」的規則。標示「未列入推薦」的只是分數較高的候選，僅供參考。</p>
       <label class="card mb-3 flex items-center gap-2 text-sm">
         <span class="shrink-0">單檔最多願意虧 NT$</span>
         <input type="number" min="0" step="500" inputmode="numeric" x-model.number="riskBudget" @input="saveBudget()" placeholder="例如 3000" class="field !p-2">
       </label>
       <div class="space-y-3">
-        <template x-for="r in latestRecs" :key="r.id">
+        <template x-for="it in planList" :key="it.code">
           <article class="card">
             <div class="flex items-start justify-between gap-3">
-              <div><h3 class="text-lg font-bold" x-text="r.code + ' ' + r.name"></h3><p class="sub" x-show="r.industry" x-text="r.industry"></p></div>
-              <span class="rounded-lg bg-indigo-50 px-3 py-1 text-sm font-bold text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300" x-text="Math.round(r.score) + ' 分'"></span>
+              <div><h3 class="text-lg font-bold" x-text="it.code + ' ' + it.name"></h3><p class="sub" x-show="it.industry" x-text="it.industry"></p></div>
+              <span class="shrink-0 rounded-lg px-3 py-1 text-sm font-bold"
+                :class="it.passed ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'"
+                x-text="(it.passed ? '✅ 推薦 ' : '👀 候選 ') + Math.round(it.score) + ' 分'"></span>
             </div>
-            <p class="mt-2 text-sm">參考價 <b x-text="money(r.price)"></b>
-              <template x-if="trackOf(r.id)"><span class="sub">　停損 <span x-text="trackOf(r.id).stop"></span>／目標 <span x-text="trackOf(r.id).target"></span></span></template>
-            </p>
-            <p class="mt-2 text-sm font-medium" x-show="riskBudget > 0 && sizeText(r)" x-text="sizeText(r)"></p>
-            <p class="mt-1 whitespace-pre-line break-words text-sm text-slate-600 dark:text-slate-300" x-text="r.reason"></p>
+            <p class="mt-2 text-sm">今日收盤 <b x-text="money(it.close)"></b></p>
+
+            <div class="mt-2 rounded-lg bg-slate-50 p-3 text-sm dark:bg-slate-800" x-show="it.plan">
+              <p class="font-bold">明日買進計畫</p>
+              <div class="mt-2 grid grid-cols-2 gap-2">
+                <div><p class="sub">理想買價（限價）</p><p class="font-bold" x-text="money(it.plan?.ideal)"></p></div>
+                <div><p class="sub">可接受上限</p><p class="font-bold" x-text="money(it.plan?.cap)"></p></div>
+                <div><p class="sub">停損</p><p class="font-bold" x-text="money(it.plan?.stop)"></p></div>
+                <div><p class="sub">目標</p><p class="font-bold" x-text="money(it.plan?.target)"></p></div>
+              </div>
+              <ul class="mt-2 list-disc space-y-1 pl-5 text-xs text-slate-600 dark:text-slate-300">
+                <li>開盤 ≤ <span x-text="it.plan?.cap"></span>：可以買，想更便宜就掛限價 <span x-text="it.plan?.ideal"></span> 等回檔</li>
+                <li>開盤 &gt; <span x-text="it.plan?.cap"></span>（開高超過 1.5%）：今天不追，等回檔或放棄</li>
+                <li>開盤 ≤ <span x-text="it.plan?.stop"></span>：跳空大跌，不要接刀</li>
+              </ul>
+            </div>
+            <p class="mt-2 text-sm font-medium" x-show="riskBudget > 0 && sizeText(it)" x-text="sizeText(it)"></p>
+            <p class="mt-2 whitespace-pre-line break-words text-sm text-slate-600 dark:text-slate-300" x-text="it.reason"></p>
             <div class="mt-3 flex gap-2">
-              <a :href="yahoo(r.code)" target="_blank" rel="noopener noreferrer" class="btn">Yahoo 股市</a>
-              <a :href="goodinfo(r.code)" target="_blank" rel="noopener noreferrer" class="btn">Goodinfo</a>
+              <a :href="yahoo(it.code)" target="_blank" rel="noopener noreferrer" class="btn">Yahoo 股市</a>
+              <a :href="goodinfo(it.code)" target="_blank" rel="noopener noreferrer" class="btn">Goodinfo</a>
             </div>
           </article>
         </template>
       </div>
-      <p x-show="latestRecs.length === 0" class="card text-sm text-slate-500 dark:text-slate-400">這個交易日沒有符合條件的標的，這是正常的，不是每天都有。</p>
+      <p x-show="planList.length === 0" class="card text-sm text-slate-500 dark:text-slate-400">目前還沒有資料，等下一次排程跑完（或手動執行 daily-update）就會出現。</p>
     </div>
   </section>
 
@@ -156,10 +176,21 @@
       </form>
       <p class="sub">只支援上市股票。沒填成本價就以最近收盤價為起點；停損 −7%、目標 +15%，與規則推薦相同。加入約需 30～90 秒。自選股不會計入「規則表現」的統計。</p>
     </div>
+    <details class="card text-sm">
+      <summary class="cursor-pointer font-bold">🧹 清理紀錄</summary>
+      <p class="sub mt-2">刪除後會一併從績效統計中移除，無法復原。單筆刪除請用每張卡片上的「🗑 刪除」。</p>
+      <div class="mt-3 flex flex-wrap gap-2">
+        <button type="button" class="btn" :disabled="busy" @click="purge('finished')">清除已完成</button>
+        <button type="button" class="btn" :disabled="busy" @click="purge('legacy')">清除舊版評分紀錄</button>
+        <button type="button" class="btn text-red-600 dark:text-red-400" :disabled="busy" @click="purge('all')">全部清空</button>
+      </div>
+    </details>
+
     <div class="flex gap-2">
-      <select x-model="filter" class="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-900" aria-label="狀態篩選">
-        <option value="">全部狀態</option>
-        <template x-for="s in statuses" :key="s"><option :value="s" x-text="s"></option></template>
+      <select x-model="view" class="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-900" aria-label="檢視">
+        <option value="active">追蹤中</option>
+        <option value="done">歷史（已完成）</option>
+        <option value="all">全部</option>
       </select>
       <select x-model="sort" class="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-900" aria-label="排序">
         <option value="new">最新推薦</option>
@@ -175,7 +206,7 @@
             <h3 class="font-bold" x-text="t.code + ' ' + t.name"></h3>
             <p class="sub" x-text="'推薦 ' + t.date + '・第 ' + t.snapshots.length + ' 個交易日・' + (t.source === 'manual' ? '自選' : '評分 ' + (scoreOf(t) == null ? '—' : Math.round(scoreOf(t)))) + (industryOf(t) ? '・' + industryOf(t) : '')"></p>
           </div>
-          <span class="chip" x-text="statusIcon(t.status) + ' ' + t.status"></span>
+          <span class="chip" x-text="statusIcon(t.status) + ' ' + statusLabel(t.status)"></span>
         </div>
 
         <div class="flex items-end justify-between gap-3">
@@ -189,6 +220,7 @@
           </svg>
         </div>
 
+        <p class="sub" x-show="t.entry">📌 推薦隔天開盤 <b x-text="money(t.entry?.open)"></b>：<span x-text="t.entry?.filled ? '依計畫會買進，至今 ' + pct(retEntry(t)) : '開高超過可接受上限，依計畫不追'"></span></p>
         <p class="sub" x-show="liveOf(t)">⚡ 即時 <b x-text="money(liveOf(t)?.price)"></b>（今日 <span :class="cls(liveDay(t))" x-text="pct(liveDay(t))"></span>）・<span x-text="liveAt()"></span><span x-show="liveOf(t)?.src === 'yahoo'">・延遲報價</span></p>
 
         <div>
@@ -203,7 +235,7 @@
         <div class="flex flex-wrap gap-2">
           <a :href="yahoo(t.code)" target="_blank" rel="noopener noreferrer" class="btn">Yahoo 股市</a>
           <a :href="goodinfo(t.code)" target="_blank" rel="noopener noreferrer" class="btn">Goodinfo</a>
-          <button type="button" x-show="t.status === '追蹤中'" :disabled="busy" @click="removeStock(t)" class="btn text-red-600 dark:text-red-400" x-text="t.source === 'manual' ? '移除自選' : '手動結案'"></button>
+          <button type="button" :disabled="busy" @click="deleteItem(t)" class="btn text-red-600 dark:text-red-400">🗑 刪除</button>
         </div>
 
         <details x-show="t.snapshots.length">
@@ -255,12 +287,13 @@
     <div class="card text-sm">
       <h2 class="font-bold">結案結果</h2>
       <div class="mt-2 flex flex-wrap gap-2">
-        <template x-for="s in statuses" :key="s"><span class="chip"><span x-text="statusIcon(s) + ' ' + s"></span>：<b x-text="count(s)"></b></span></template>
+        <template x-for="s in statuses" :key="s"><span class="chip"><span x-text="statusIcon(s) + ' ' + statusLabel(s)"></span>：<b x-text="count(s)"></b></span></template>
       </div>
       <p class="sub mt-3">全部紀錄平均報酬扣除估計交易成本（買賣手續費加證交稅，約 0.6%）：
         <b :class="cls(all.avg == null ? null : all.avg - 0.6)" x-text="pct(all.avg == null ? null : all.avg - 0.6)"></b></p>
       <p class="sub mt-1">最佳 <span :class="cls(all.best)" x-text="pct(all.best)"></span>　最差 <span :class="cls(all.worst)" x-text="pct(all.worst)"></span></p>
     </div>
+    <p class="sub" x-show="skipped > 0">另有 <b x-text="skipped"></b> 筆因隔天開高超過可接受上限，依計畫不買進，沒有計入「依計畫買進」。</p>
     <button type="button" class="btn" @click="exportCsv()">匯出 CSV（可用 Excel 開啟）</button>
     <p class="sub">同一檔股票的推薦彼此不獨立，且推薦日價格是當日收盤價，實際無法剛好買在這個價位，真實績效通常會更差。</p>
   </section>
@@ -270,6 +303,7 @@
     <div class="card">
       <h2 class="font-bold">推薦規則（每個交易日收盤後自動執行）</h2>
       <p class="mt-2 text-slate-600 dark:text-slate-300">評分為 0–100 的連續分數，達 <b x-text="state.params?.threshold ?? 70"></b> 分才推薦：趨勢 30（站上月均價、過熱會扣分）、當日動能 20（漲 2.5% 最高）、量能 30（為近 5 日均量 2 倍滿分）、流動性 20（成交值排名越前越高）。量能歷史不足 3 天時不計入，其餘按比例換算。每天最多 <span x-text="state.params?.maxNew ?? 5"></span> 檔，同一產業最多 <span x-text="state.params?.maxPerIndustry ?? 2"></span> 檔。停損 −7%、目標 +15%、最長追蹤 <span x-text="state.params?.maxDays ?? 20"></span> 個交易日。</p>
+      <p class="mt-2 text-slate-600 dark:text-slate-300">明日買進計畫：理想買價是收盤價的 99%（掛限價等小回檔），可接受上限是收盤價的 101.5%，開盤超過就不追。系統會在推薦隔天記錄真實開盤價，統計「照計畫買」到底賺不賺。</p>
       <p class="mt-2 text-slate-600 dark:text-slate-300">大盤環境過濾：當大盤（等權重指數）低於近 5 日均線時，推薦門檻 +5 分、每天最多 3 檔，行情轉弱時自動收斂。</p>
       <p class="sub mt-2">這是量化規則篩選，不是投資建議，也不保證獲利。台股慣例：紅色上漲、綠色下跌。</p>
     </div>
@@ -313,7 +347,7 @@ function app() {
       { id: 'perf', label: '績效', icon: '🧪' }, { id: 'about', label: '說明', icon: 'ℹ️' }
     ],
     statuses: ['追蹤中', '已達標', '已失效', '已結案'],
-    tab: 'home', filter: '', sort: 'new', error: '', loading: false,
+    tab: 'home', view: 'active', sort: 'new', error: '', loading: false,
     state: { recommendations: [], tracking: [], market: [], lastDate: null, updatedAt: null },
     riskBudget: 0, live: null, token: '', tokenInput: '', showSettings: false, busy: false, busyMsg: '',
     addForm: { code: '', cost: '', note: '' },
@@ -422,10 +456,14 @@ function app() {
       const r = await this.run('add', { code: f.code, cost: String(f.cost || ''), note: f.note || '' });
       if (r && r.ok) this.addForm = { code: '', cost: '', note: '' };
     },
-    async removeStock(t) {
-      const msg = t.source === 'manual' ? `移除自選股 ${t.code} ${t.name}？` : `手動結案 ${t.code} ${t.name}？（紀錄會保留）`;
-      if (confirm(msg)) await this.run('remove', { code: t.code });
+    async deleteItem(t) {
+      if (confirm('刪除 ' + t.code + ' ' + t.name + '？會一併從績效統計中移除，無法復原。')) await this.run('delete', { code: t.id });
     },
+    async purge(mode) {
+      const msg = { finished: '清除所有已完成（到期、達標、失效）的紀錄？', legacy: '清除所有舊版評分的紀錄？（自選股不受影響）', all: '全部清空？所有追蹤與推薦紀錄都會刪除，無法復原。' }[mode];
+      if (confirm(msg)) await this.run('purge', { code: mode });
+    },
+    statusLabel(s) { return s === '已結案' ? '到期' : s; },
     liveOf(t) { return this.live && this.live.quotes ? this.live.quotes[t.code] || null : null; },
     liveDay(t) { const q = this.liveOf(t); return q && q.prev ? (q.price / q.prev - 1) * 100 : null; },
     liveAt() { return this.live && this.live.updatedAt ? this.live.updatedAt.replace('T', ' ').slice(5, 16) : ''; },
@@ -433,10 +471,16 @@ function app() {
     /* ---- 衍生資料 ---- */
     get updatedText() { return this.state.updatedAt ? '最後更新 ' + this.state.updatedAt.replace('T', ' ').slice(0, 16) : '尚未更新'; },
     get staleDays() { return this.state.lastDate ? Math.floor((Date.now() - new Date(this.state.lastDate + 'T00:00:00+08:00')) / 86400000) : 0; },
+    get planList() {
+      const c = this.state.candidates;
+      if (c && c.date === this.state.lastDate && c.items) return c.items;
+      return this.latestRecs.map(r => ({ code: r.code, name: r.name, industry: r.industry || '', score: r.score, close: r.price, passed: true, reason: r.reason, plan: r.plan || null }));
+    },
     get latestRecs() { return this.state.recommendations.filter(r => r.date === this.state.lastDate && r.source !== 'manual'); },
     get measured() { return this.state.tracking.filter(t => t.snapshots.length && t.source !== 'manual'); },
     get manualMeasured() { return this.state.tracking.filter(t => t.snapshots.length && t.source === 'manual'); },
     get all() { return this.stat(this.measured); },
+    get skipped() { return this.measured.filter(t => t.entry && !t.entry.filled).length; },
     get regime() {
       const m = this.state.market;
       if (m.length < 5) return { ok: false, weak: false, text: '大盤狀態累積中（' + m.length + '/5 個交易日）' };
@@ -445,16 +489,17 @@ function app() {
       return { ok: true, weak, text: weak ? '大盤偏弱：指數低於近 5 日均線，推薦門檻 +5 分、每天最多 3 檔' : '大盤正常：指數在近 5 日均線之上' };
     },
     saveBudget() { try { localStorage.setItem('riskBudget', String(this.riskBudget || 0)); } catch (e) {} },
-    sizeText(r) {
-      const t = this.trackOf(r.id);
-      const stop = t ? t.stop : r.price * 0.93;
-      const loss = r.price - stop;
+    sizeText(it) {
+      const price = it.plan ? it.plan.ideal : it.close;
+      const stop = it.plan ? it.plan.stop : price * 0.93;
+      const loss = price - stop;
       if (!(loss > 0) || !(this.riskBudget > 0)) return '';
       const sh = Math.floor(this.riskBudget / loss);
       if (sh < 1) return '💰 這個預算買不到 1 股，停損時虧損會超過上限';
       const n = v => Number(v).toLocaleString('zh-TW');
-      return '💰 停損最多虧 NT$ ' + n(this.riskBudget) + '：約買 ' + n(sh) + ' 股' + (sh >= 1000 ? '（≈ ' + (sh / 1000).toFixed(1) + ' 張）' : '') + '，投入約 NT$ ' + n(Math.round(sh * r.price)) + '（未含手續費與滑價）';
+      return '💰 以理想買價計，停損最多虧 NT$ ' + n(this.riskBudget) + '：約買 ' + n(sh) + ' 股' + (sh >= 1000 ? '（≈ ' + (sh / 1000).toFixed(1) + ' 張）' : '') + '，投入約 NT$ ' + n(Math.round(sh * price)) + '（未含手續費）';
     },
+    retEntry(t) { const e = t.entry, l = this.latest(t); return e && e.filled && l != null ? (l / e.open - 1) * 100 : null; },
     exportCsv() {
       const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
       const head = ['代號', '名稱', '產業', '來源', '評分', '推薦日', '推薦價', '最新價', '報酬%', '超額%', '狀態', '交易日數'];
@@ -488,7 +533,7 @@ function app() {
       return out;
     },
     get trackingList() {
-      const l = this.state.tracking.filter(t => !this.filter || t.status === this.filter);
+      const l = this.state.tracking.filter(t => this.view === 'all' || (this.view === 'active') === (t.status === '追蹤中'));
       if (this.sort === 'ret') return [...l].sort((a, b) => (this.ret(b) ?? -999) - (this.ret(a) ?? -999));
       if (this.sort === 'stop') return [...l].sort((a, b) => (this.distStop(a) ?? 999) - (this.distStop(b) ?? 999));
       return [...l].sort((a, b) => b.date.localeCompare(a.date));
@@ -501,12 +546,14 @@ function app() {
         { label: '評分 70–74（新版）', ...this.stat(b(70, 75)) },
         { label: '評分 75–79（新版）', ...this.stat(b(75, 80)) },
         { label: '評分 80 以上（新版）', ...this.stat(b(80, 101)) },
+        { label: '依計畫隔日開盤買進', ...this.stat(this.measured.filter(t => t.entry && t.entry.filled), t => this.retEntry(t), () => null) },
         { label: '自選股（非規則）', ...this.stat(this.manualMeasured) }
       ];
     },
-    stat(list) {
-      const r = list.map(t => this.ret(t)).filter(v => v != null);
-      const ex = list.map(t => this.excess(t)).filter(v => v != null);
+    stat(list, retFn, exFn) {
+      const rf = retFn || (t => this.ret(t)), ef = exFn || (t => this.excess(t));
+      const r = list.map(rf).filter(v => v != null);
+      const ex = list.map(ef).filter(v => v != null);
       const avg = a => a.length ? a.reduce((s, v) => s + v, 0) / a.length : null;
       return {
         n: r.length, win: r.length ? r.filter(v => v > 0).length / r.length * 100 : null,
