@@ -71,7 +71,7 @@ def cmd_add(code, cost_text, note):
     rid = f"{date}-{code}-m{int(time.time())}"
     reason = "手動加入自選" + (f"：{note}" if note else "") + (f"（成本價 {base}）" if cost else "（以最近收盤價為起點）")
     state["recommendations"].append({
-        "id": rid, "code": code, "name": name, "industry": update.fetch_industries().get(code, ""), "date": date, "price": base, "score": None,
+        "id": rid, "code": code, "name": name, "industry": "", "date": date, "price": base, "score": None,
         "reason": reason, "source": "manual",
         "risk": f"收盤跌破 {stop}（-7%）視為失效；追蹤滿 {update.MAX_DAYS} 個交易日自動結案。",
     })
@@ -123,6 +123,62 @@ def cmd_refresh():
     return f"已更新 {len(got)}／{len(codes)} 檔的報價{tail}"
 
 
+def drop_tracking(state, ids):
+    """刪除指定追蹤項目，連同不再被使用的推薦紀錄。"""
+    ids = set(ids)
+    rec_ids = {t["recId"] for t in state["tracking"] if t["id"] in ids}
+    state["tracking"] = [t for t in state["tracking"] if t["id"] not in ids]
+    still = {t["recId"] for t in state["tracking"]}
+    state["recommendations"] = [r for r in state["recommendations"] if not (r["id"] in rec_ids and r["id"] not in still)]
+
+
+def cmd_delete(item_id):
+    state = load_state()
+    hit = next((t for t in state["tracking"] if t["id"] == item_id), None)
+    if not hit:
+        raise Fail("找不到這筆紀錄（可能已經被刪除）")
+    drop_tracking(state, [item_id])
+    save_state(state)
+    return f"已刪除 {hit['code']} {hit['name']}"
+
+
+def cmd_purge(mode):
+    state = load_state()
+    recs = {r["id"]: r for r in state["recommendations"]}
+    if mode == "finished":
+        ids = [t["id"] for t in state["tracking"] if t["status"] != "追蹤中"]
+        label = "已完成（到期、達標、失效）"
+    elif mode == "legacy":
+        ids = [t["id"] for t in state["tracking"]
+               if t.get("source") != "manual" and recs.get(t["recId"], {}).get("scoreVer") != update.SCORE_VERSION]
+        label = "舊版評分"
+    elif mode == "all":
+        ids = [t["id"] for t in state["tracking"]]
+        label = "全部"
+    else:
+        raise Fail(f"未知的清理模式：{mode}")
+    n_before = len(state["recommendations"])
+    drop_tracking(state, ids)
+    if mode == "legacy":  # 沒有追蹤的舊版推薦也一併清掉
+        state["recommendations"] = [r for r in state["recommendations"]
+                                    if r.get("source") == "manual" or r.get("scoreVer") == update.SCORE_VERSION]
+    if mode == "all":
+        state["recommendations"] = []
+    save_state(state)
+    return f"已清除{label}紀錄：追蹤 {len(ids)} 筆、推薦 {n_before - len(state['recommendations'])} 筆"
+
+
+def auto_backfill():
+    """替沒有產業的舊紀錄補上產業；回傳補了幾筆。"""
+    state = load_state()
+    if not any(not r.get("industry") for r in state["recommendations"]):
+        return 0
+    n = update.backfill_industries(state, update.fetch_industries())
+    state["industryError"] = update.LAST_INDUSTRY_ERROR
+    save_state(state)
+    return n
+
+
 def main():
     action = os.environ.get("ACTION", "").strip()
     code = os.environ.get("CODE", "").strip()
@@ -136,8 +192,18 @@ def main():
             msg = cmd_remove(code)
         elif action == "refresh":
             msg = cmd_refresh()
+        elif action == "delete":
+            msg = cmd_delete(code)
+        elif action == "purge":
+            msg = cmd_purge(code)
         else:
             raise Fail(f"未知的動作：{action}")
+        try:
+            n = auto_backfill()
+            if n:
+                msg += f"；已替 {n} 筆舊推薦補上產業"
+        except Exception as e:
+            print(f"補產業時發生錯誤：{e}")
         write_result(True, msg, nonce, action, code)
     except Fail as e:
         write_result(False, str(e), nonce, action, code)
