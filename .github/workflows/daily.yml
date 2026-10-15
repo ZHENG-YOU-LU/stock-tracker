@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "30 9 * * 1-5"   # UTC 09:30 = 台北 17:30，週一到週五
   workflow_dispatch:          # 也可在 Actions 頁面手動執行
+    inputs:
+      force:
+        description: "強制重算當日（用最新規則取代當日規則推薦，自選股保留）"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -25,6 +30,7 @@ jobs:
       - name: Fetch, track, recommend, notify
         run: python scripts/update.py
         env:
+          FORCE: ${{ inputs.force }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
