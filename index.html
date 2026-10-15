@@ -72,6 +72,11 @@
       <div class="stat"><p class="sub">平均超額（vs 大盤）</p><p class="mt-1 text-2xl font-bold" :class="cls(all.ex)" x-text="pct(all.ex)"></p></div>
     </div>
 
+    <div class="card flex items-start gap-2 text-sm">
+      <span x-text="regime.ok ? (regime.weak ? '🌧' : '☀️') : '⏳'"></span>
+      <span x-text="regime.text"></span>
+    </div>
+
     <div class="card" x-show="alerts.length">
       <h2 class="font-bold">需要注意</h2>
       <ul class="mt-2 divide-y divide-slate-100 text-sm dark:divide-slate-800">
@@ -94,6 +99,10 @@
 
     <div>
       <h2 class="mb-2 font-bold" x-text="'今日新推薦（' + (state.lastDate || '—') + '）'"></h2>
+      <label class="card mb-3 flex items-center gap-2 text-sm">
+        <span class="shrink-0">單檔最多願意虧 NT$</span>
+        <input type="number" min="0" step="500" inputmode="numeric" x-model.number="riskBudget" @input="saveBudget()" placeholder="例如 3000" class="field !p-2">
+      </label>
       <div class="space-y-3">
         <template x-for="r in latestRecs" :key="r.id">
           <article class="card">
@@ -104,6 +113,7 @@
             <p class="mt-2 text-sm">參考價 <b x-text="money(r.price)"></b>
               <template x-if="trackOf(r.id)"><span class="sub">　停損 <span x-text="trackOf(r.id).stop"></span>／目標 <span x-text="trackOf(r.id).target"></span></span></template>
             </p>
+            <p class="mt-2 text-sm font-medium" x-show="riskBudget > 0 && sizeText(r)" x-text="sizeText(r)"></p>
             <p class="mt-1 whitespace-pre-line break-words text-sm text-slate-600 dark:text-slate-300" x-text="r.reason"></p>
             <div class="mt-3 flex gap-2">
               <a :href="yahoo(r.code)" target="_blank" rel="noopener noreferrer" class="btn">Yahoo 股市</a>
@@ -251,6 +261,7 @@
         <b :class="cls(all.avg == null ? null : all.avg - 0.6)" x-text="pct(all.avg == null ? null : all.avg - 0.6)"></b></p>
       <p class="sub mt-1">最佳 <span :class="cls(all.best)" x-text="pct(all.best)"></span>　最差 <span :class="cls(all.worst)" x-text="pct(all.worst)"></span></p>
     </div>
+    <button type="button" class="btn" @click="exportCsv()">匯出 CSV（可用 Excel 開啟）</button>
     <p class="sub">同一檔股票的推薦彼此不獨立，且推薦日價格是當日收盤價，實際無法剛好買在這個價位，真實績效通常會更差。</p>
   </section>
 
@@ -259,6 +270,7 @@
     <div class="card">
       <h2 class="font-bold">推薦規則（每個交易日收盤後自動執行）</h2>
       <p class="mt-2 text-slate-600 dark:text-slate-300">評分為 0–100 的連續分數，達 <b x-text="state.params?.threshold ?? 70"></b> 分才推薦：趨勢 30（站上月均價、過熱會扣分）、當日動能 20（漲 2.5% 最高）、量能 30（為近 5 日均量 2 倍滿分）、流動性 20（成交值排名越前越高）。量能歷史不足 3 天時不計入，其餘按比例換算。每天最多 <span x-text="state.params?.maxNew ?? 5"></span> 檔，同一產業最多 <span x-text="state.params?.maxPerIndustry ?? 2"></span> 檔。停損 −7%、目標 +15%、最長追蹤 <span x-text="state.params?.maxDays ?? 20"></span> 個交易日。</p>
+      <p class="mt-2 text-slate-600 dark:text-slate-300">大盤環境過濾：當大盤（等權重指數）低於近 5 日均線時，推薦門檻 +5 分、每天最多 3 檔，行情轉弱時自動收斂。</p>
       <p class="sub mt-2">這是量化規則篩選，不是投資建議，也不保證獲利。台股慣例：紅色上漲、綠色下跌。</p>
     </div>
     <div class="card">
@@ -303,11 +315,11 @@ function app() {
     statuses: ['追蹤中', '已達標', '已失效', '已結案'],
     tab: 'home', filter: '', sort: 'new', error: '', loading: false,
     state: { recommendations: [], tracking: [], market: [], lastDate: null, updatedAt: null },
-    live: null, token: '', tokenInput: '', showSettings: false, busy: false, busyMsg: '',
+    riskBudget: 0, live: null, token: '', tokenInput: '', showSettings: false, busy: false, busyMsg: '',
     addForm: { code: '', cost: '', note: '' },
 
     init() {
-      try { this.token = localStorage.getItem('ghToken') || ''; } catch (e) {}
+      try { this.token = localStorage.getItem('ghToken') || ''; this.riskBudget = Number(localStorage.getItem('riskBudget')) || 0; } catch (e) {}
       const h = location.hash.replace('#', '');
       if (this.tabs.some(t => t.id === h)) this.tab = h;
       this.load();
@@ -425,6 +437,37 @@ function app() {
     get measured() { return this.state.tracking.filter(t => t.snapshots.length && t.source !== 'manual'); },
     get manualMeasured() { return this.state.tracking.filter(t => t.snapshots.length && t.source === 'manual'); },
     get all() { return this.stat(this.measured); },
+    get regime() {
+      const m = this.state.market;
+      if (m.length < 5) return { ok: false, weak: false, text: '大盤狀態累積中（' + m.length + '/5 個交易日）' };
+      const avg = m.slice(-5).reduce((a, x) => a + x.idx, 0) / 5;
+      const weak = m[m.length - 1].idx < avg;
+      return { ok: true, weak, text: weak ? '大盤偏弱：指數低於近 5 日均線，推薦門檻 +5 分、每天最多 3 檔' : '大盤正常：指數在近 5 日均線之上' };
+    },
+    saveBudget() { try { localStorage.setItem('riskBudget', String(this.riskBudget || 0)); } catch (e) {} },
+    sizeText(r) {
+      const t = this.trackOf(r.id);
+      const stop = t ? t.stop : r.price * 0.93;
+      const loss = r.price - stop;
+      if (!(loss > 0) || !(this.riskBudget > 0)) return '';
+      const sh = Math.floor(this.riskBudget / loss);
+      if (sh < 1) return '💰 這個預算買不到 1 股，停損時虧損會超過上限';
+      const n = v => Number(v).toLocaleString('zh-TW');
+      return '💰 停損最多虧 NT$ ' + n(this.riskBudget) + '：約買 ' + n(sh) + ' 股' + (sh >= 1000 ? '（≈ ' + (sh / 1000).toFixed(1) + ' 張）' : '') + '，投入約 NT$ ' + n(Math.round(sh * r.price)) + '（未含手續費與滑價）';
+    },
+    exportCsv() {
+      const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+      const head = ['代號', '名稱', '產業', '來源', '評分', '推薦日', '推薦價', '最新價', '報酬%', '超額%', '狀態', '交易日數'];
+      const rows = this.state.tracking.map(t => [t.code, t.name, this.industryOf(t), t.source === 'manual' ? '自選' : '規則',
+        this.scoreOf(t) == null ? '' : this.scoreOf(t), t.date, t.basePrice, this.latest(t) ?? '',
+        this.ret(t) == null ? '' : this.ret(t).toFixed(2), this.excess(t) == null ? '' : this.excess(t).toFixed(2), t.status, t.snapshots.length]);
+      const csv = '\ufeff' + [head, ...rows].map(r => r.map(q).join(',')).join('\r\n');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+      a.download = 'stock-tracker-' + (this.state.lastDate || 'data') + '.csv';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    },
     get industryDist() {
       const act = this.state.tracking.filter(t => t.status === '追蹤中');
       const c = {};
