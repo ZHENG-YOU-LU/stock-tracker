@@ -1,1 +1,1 @@
-{"ok": true, "message": "已更新 12／12 檔的報價（其中 12 檔來自 Yahoo，可能延遲約 20 分鐘）；已替 11 筆舊推薦補上產業", "nonce": "m37qk738", "action": "refresh", "code": "", "at": "2026-10-15T14:39:55+08:00"}
+{"ok": true, "message": "已清除舊版評分紀錄：追蹤 10 筆、推薦 10 筆", "nonce": "xua8de9o", "action": "purge", "code": "legacy", "at": "2026-10-15T14:40:17+08:00"}
