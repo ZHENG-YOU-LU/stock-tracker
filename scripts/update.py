@@ -27,6 +27,8 @@ THRESHOLD = 70          # 達到幾分才推薦
 MAX_NEW = 5             # 每天最多新增幾檔
 MAX_PER_INDUSTRY = 2    # 同一產業每天最多推薦幾檔（分散風險）
 SCORE_VERSION = 2       # 評分版本：2 = 0–100 連續分數
+WEAK_THRESHOLD_ADD = 5  # 大盤偏弱時，推薦門檻加幾分
+WEAK_MAX_NEW = 3        # 大盤偏弱時，每天最多推薦幾檔
 STOP_RATIO = 0.93       # 停損：-7%
 TARGET_RATIO = 1.15     # 達標：+15%
 MAX_DAYS = 20           # 追蹤滿幾個交易日自動結案
@@ -188,12 +190,19 @@ def main():
     prices = load(PRICES_F, {})
 
     sig = hashlib.md5(json.dumps(sorted((c, s["close"], s["vol"]) for c, s in stocks.items())).encode()).hexdigest()
-    if sig == state.get("signature"):
+    force = os.environ.get("FORCE", "").lower() in ("1", "true", "yes") or "--force" in sys.argv
+    if sig == state.get("signature") and not force:
         print("資料與上次相同（可能是休市日），不更新")
         return
     date = trade_date(rows)
     now_ms = int(time.time() * 1000)
     events = []
+    if force:
+        # 強制重算：把「當日由規則產生」的推薦與追蹤整批移除，再用目前規則重新產生。自選股保留，不會新舊混在一起。
+        drop = {r["id"] for r in state["recommendations"] if r["date"] == date and r.get("source") != "manual"}
+        state["recommendations"] = [r for r in state["recommendations"] if r["id"] not in drop]
+        state["tracking"] = [t for t in state["tracking"] if t["recId"] not in drop]
+        print(f"強制重算 {date}：已移除當日 {len(drop)} 筆規則推薦")
 
     # 1) 更新追蹤中的快照，並檢查停損／達標／到期
     for t in state["tracking"]:
@@ -221,6 +230,19 @@ def main():
         key=lambda x: x[1]["val"],
         reverse=True,
     )
+    # 大盤基準：流動性足夠股票的等權重日報酬，累積成指數（首日 = 100），用來算超額報酬與判斷大盤強弱
+    rets = [max(-0.11, min(0.11, s["chg"] / (s["close"] - s["chg"]))) for _, s in liquid if s["close"] - s["chg"] > 0]
+    mean = sum(rets) / len(rets) if rets else 0.0
+    mk = state.get("market") or []
+    if not mk or mk[-1]["date"] != date:
+        mk.append({"date": date, "idx": 100.0 if not mk else round(mk[-1]["idx"] * (1 + mean), 4)})
+    state["market"] = mk[-500:]
+    last5 = [x["idx"] for x in state["market"][-5:]]
+    weak = len(last5) >= 5 and state["market"][-1]["idx"] < sum(last5) / 5  # 低於近 5 日均線 = 偏弱
+    threshold = THRESHOLD + (WEAK_THRESHOLD_ADD if weak else 0)
+    max_new = WEAK_MAX_NEW if weak else MAX_NEW
+    print(f"大盤狀態：{'偏弱，門檻 ' + str(threshold) + '、最多 ' + str(max_new) + ' 檔' if weak else '正常'}")
+
     active = {t["code"] for t in state["tracking"] if t["status"] == "追蹤中"}
     last_rec = {}
     for r in state["recommendations"]:
@@ -235,7 +257,7 @@ def main():
         if code in last_rec and (today - datetime.fromisoformat(last_rec[code])).days < COOLDOWN_DAYS:
             continue
         pts, why = score(s, prices.get(code, []), ma_map.get(code), rank)
-        if pts >= THRESHOLD:
+        if pts >= threshold:
             picks.append((pts, s["val"], code, s, why))
     picks.sort(key=lambda x: (-x[0], -x[1]))
     chosen, per_ind = [], {}
@@ -245,7 +267,7 @@ def main():
             continue
         per_ind[ind] = per_ind.get(ind, 0) + 1
         chosen.append(pick)
-        if len(chosen) >= MAX_NEW:
+        if len(chosen) >= max_new:
             break
 
     new_lines = []
@@ -256,7 +278,7 @@ def main():
         risk = f"收盤跌破 {stop}（-7%）視為失效；追蹤滿 {MAX_DAYS} 個交易日自動結案。量化規則篩選，非投資建議。"
         state["recommendations"].append({
             "id": rid, "code": code, "name": s["name"], "industry": industries.get(code, ""), "date": date,
-            "price": s["close"], "score": pts, "scoreVer": SCORE_VERSION, "reason": "\n".join(why), "risk": risk,
+            "price": s["close"], "score": pts, "scoreVer": SCORE_VERSION, "regime": "weak" if weak else "normal", "reason": "\n".join(why), "risk": risk,
         })
         state["tracking"].append({
             "id": "t-" + rid, "recId": rid, "code": code, "name": s["name"], "date": date,
@@ -271,17 +293,10 @@ def main():
         if not h or h[-1][0] != date:
             h.append([date, s["close"], s["vol"]])
         prices[code] = h[-HISTORY_KEEP:]
-    # 大盤基準：流動性足夠股票的等權重日報酬，累積成指數（首日 = 100），用來計算超額報酬
-    rets = [max(-0.11, min(0.11, s["chg"] / (s["close"] - s["chg"]))) for _, s in liquid if s["close"] - s["chg"] > 0]
-    mean = sum(rets) / len(rets) if rets else 0.0
-    mk = state.get("market") or []
-    if not mk or mk[-1]["date"] != date:
-        mk.append({"date": date, "idx": 100.0 if not mk else round(mk[-1]["idx"] * (1 + mean), 4)})
-    state["market"] = mk[-500:]
     state.update({
         "lastDate": date, "signature": sig,
         "updatedAt": datetime.now(TZ).isoformat(timespec="seconds"),
-        "params": {"threshold": THRESHOLD, "stop": STOP_RATIO, "target": TARGET_RATIO, "maxDays": MAX_DAYS,
+        "params": {"threshold": threshold, "baseThreshold": THRESHOLD, "weakMarket": weak, "maxNew": max_new, "stop": STOP_RATIO, "target": TARGET_RATIO, "maxDays": MAX_DAYS,
                    "scoreVer": SCORE_VERSION, "maxPerIndustry": MAX_PER_INDUSTRY},
     })
     STATE_F.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -289,7 +304,7 @@ def main():
     print(f"{date}：新推薦 {len(new_lines)} 檔，觸發事件 {len(events)} 項")
 
     # 4) 寄信（有新推薦或觸發事件才寄）
-    if new_lines or events:
+    if (new_lines or events) and not force:
         parts = [f"交易日：{date}", ""]
         if new_lines:
             parts += ["■ 今日新推薦", *new_lines, ""]
