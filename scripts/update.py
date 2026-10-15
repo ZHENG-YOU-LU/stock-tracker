@@ -3,6 +3,7 @@
 只使用 Python 標準函式庫。資料寫入 data/state.json 與 data/prices.json。"""
 import hashlib
 import json
+import math
 import os
 import re
 import smtplib
@@ -25,6 +26,9 @@ MIN_PRICE = 10          # 排除低價股
 MIN_VALUE = 1e8         # 成交值至少 1 億（流動性）
 THRESHOLD = 70          # 達到幾分才推薦
 MAX_NEW = 5             # 每天最多新增幾檔
+N_CANDIDATES = 5       # 每天的候選榜單顯示幾檔
+BUY_DISCOUNT = 0.99     # 明日理想買價 = 收盤價 × 0.99（掛限價等小回檔）
+BUY_CAP = 1.015         # 明日可接受上限 = 收盤價 × 1.015（開高超過就不追）
 MAX_PER_INDUSTRY = 2    # 同一產業每天最多推薦幾檔（分散風險）
 SCORE_VERSION = 2       # 評分版本：2 = 0–100 連續分數
 WEAK_THRESHOLD_ADD = 5  # 大盤偏弱時，推薦門檻加幾分
@@ -62,11 +66,17 @@ IND_NAMES = {
 }
 
 
+LAST_INDUSTRY_ERROR = ""
+
+
 def fetch_industries():
-    """代號 → 產業名稱。失敗時回傳空字典（產業欄留空、不做產業分散，其餘照常運作）。"""
+    """代號 → 產業名稱。失敗時回傳空字典，並把原因記在 LAST_INDUSTRY_ERROR（網頁會顯示）。"""
+    global LAST_INDUSTRY_ERROR
+    LAST_INDUSTRY_ERROR = ""
     try:
         rows = get("https://openapi.twse.com.tw/v1/opendata/t187ap03_L")
     except Exception as e:
+        LAST_INDUSTRY_ERROR = f"{type(e).__name__}: {e}"
         print("產業資料取得失敗：", e)
         return {}
     out = {}
@@ -75,7 +85,21 @@ def fetch_industries():
         ind = str(r.get("產業別", "")).strip()
         if code and ind:
             out[code] = IND_NAMES.get(ind.zfill(2), ind) if ind.isdigit() else ind
+    if not out:
+        keys = list(rows[0].keys())[:6] if rows else []
+        LAST_INDUSTRY_ERROR = f"沒有解析到產業資料，欄位可能不同：{keys}"
+        print(LAST_INDUSTRY_ERROR)
     return out
+
+
+def backfill_industries(state, industries):
+    """替舊紀錄補上產業。回傳補了幾筆。"""
+    n = 0
+    for r in state.get("recommendations", []):
+        if not r.get("industry") and industries.get(r.get("code")):
+            r["industry"] = industries[r["code"]]
+            n += 1
+    return n
 
 
 def num(v):
@@ -99,6 +123,31 @@ def load(path, default):
         return json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError):
         return default
+
+
+def tick(p):
+    """台股升降單位。"""
+    for limit, t in ((10, 0.01), (50, 0.05), (100, 0.1), (500, 0.5), (1000, 1)):
+        if p < limit:
+            return t
+    return 5
+
+
+def round_tick(p, up=False):
+    t = tick(p)
+    n = math.ceil(p / t - 1e-9) if up else math.floor(p / t + 1e-9)
+    return round(n * t, 2)
+
+
+def make_plan(close):
+    """明日買進計畫：收盤後算出，無法預測開盤價，只給「開在什麼價位該怎麼做」的規則。"""
+    ideal = round_tick(close * BUY_DISCOUNT)
+    return {
+        "ideal": ideal,                                   # 理想限價買價
+        "cap": round_tick(close * BUY_CAP),               # 開盤高於此價就不追
+        "stop": round_tick(ideal * STOP_RATIO, up=True),  # 以理想買價計的停損
+        "target": round_tick(ideal * TARGET_RATIO),       # 以理想買價計的目標
+    }
 
 
 def clamp(x):
@@ -180,9 +229,10 @@ def main():
         if not re.fullmatch(r"[1-9]\d{3}", code):
             continue
         close, vol, val, chg = (num(r.get(k)) for k in ("ClosingPrice", "TradeVolume", "TradeValue", "Change"))
+        opn = num(r.get("OpeningPrice"))
         if not close or close <= 0:
             continue
-        stocks[code] = {"name": r.get("Name", ""), "close": close, "vol": vol or 0, "val": val or 0, "chg": chg or 0}
+        stocks[code] = {"name": r.get("Name", ""), "close": close, "vol": vol or 0, "val": val or 0, "chg": chg or 0, "open": opn}
     if len(stocks) < 500:
         sys.exit(f"資料異常：只取得 {len(stocks)} 檔，中止更新")
 
@@ -211,6 +261,9 @@ def main():
         s = stocks.get(t["code"])
         if not s:
             continue
+        if t.get("plan") and "entry" not in t and date > t["date"]:  # 推薦後的第一個交易日：記錄開盤價，檢驗「依計畫買進」的真實結果
+            op = s.get("open") or s["close"]
+            t["entry"] = {"date": date, "open": op, "filled": t["plan"]["stop"] < op <= t["plan"]["cap"]}
         t["snapshots"].append({"date": date, "price": s["close"], "at": now_ms})
         ret = (s["close"] / t["basePrice"] - 1) * 100
         new = None
@@ -249,17 +302,19 @@ def main():
         last_rec[r["code"]] = max(last_rec.get(r["code"], ""), r["date"])
     today = datetime.fromisoformat(date)
     industries = fetch_industries()
+    state["industryError"] = LAST_INDUSTRY_ERROR
+    backfill_industries(state, industries)
 
-    picks = []
+    scored = []
     for rank, (code, s) in enumerate(liquid, 1):
         if code in active:
             continue
         if code in last_rec and (today - datetime.fromisoformat(last_rec[code])).days < COOLDOWN_DAYS:
             continue
         pts, why = score(s, prices.get(code, []), ma_map.get(code), rank)
-        if pts >= threshold:
-            picks.append((pts, s["val"], code, s, why))
-    picks.sort(key=lambda x: (-x[0], -x[1]))
+        scored.append((pts, s["val"], code, s, why))
+    scored.sort(key=lambda x: (-x[0], -x[1]))
+    picks = [x for x in scored if x[0] >= threshold]
     chosen, per_ind = [], {}
     for pick in picks:
         ind = industries.get(pick[2], "")
@@ -278,14 +333,31 @@ def main():
         risk = f"收盤跌破 {stop}（-7%）視為失效；追蹤滿 {MAX_DAYS} 個交易日自動結案。量化規則篩選，非投資建議。"
         state["recommendations"].append({
             "id": rid, "code": code, "name": s["name"], "industry": industries.get(code, ""), "date": date,
-            "price": s["close"], "score": pts, "scoreVer": SCORE_VERSION, "regime": "weak" if weak else "normal", "reason": "\n".join(why), "risk": risk,
+            "price": s["close"], "score": pts, "scoreVer": SCORE_VERSION, "regime": "weak" if weak else "normal", "plan": make_plan(s["close"]), "reason": "\n".join(why), "risk": risk,
         })
         state["tracking"].append({
             "id": "t-" + rid, "recId": rid, "code": code, "name": s["name"], "date": date,
             "basePrice": s["close"], "status": "追蹤中", "snapshots": [],
-            "stop": stop, "target": target,
+            "stop": stop, "target": target, "plan": make_plan(s["close"]),
         })
-        new_lines.append(f"{code} {s['name']}" + (f"（{industries[code]}）" if industries.get(code) else "") + f"　參考價 {s['close']:.2f}　評分 {pts:.0f}\n  理由：{'；'.join(why)}\n  停損 {stop}／目標 {target}")
+        new_lines.append(f"{code} {s['name']}" + (f"（{industries[code]}）" if industries.get(code) else "") + f"　參考價 {s['close']:.2f}　評分 {pts:.0f}\n  理由：{'；'.join(why)}\n  停損 {stop}／目標 {target}\n  明日買進計畫：限價 {make_plan(s['close'])['ideal']}，開盤超過 {make_plan(s['close'])['cap']} 就不追")
+
+    # 候選榜單：不論有沒有達門檻，每天固定列出分數最高的幾檔，並附明日買進計畫（未達門檻者僅供參考）
+    chosen_codes = {c[2] for c in chosen}
+    cand, per_ind2 = [], {}
+    for pts, _, code, s, why in scored:
+        ind = industries.get(code, "")
+        if code not in chosen_codes and ind and per_ind2.get(ind, 0) >= MAX_PER_INDUSTRY:
+            continue
+        per_ind2[ind] = per_ind2.get(ind, 0) + 1
+        cand.append({
+            "code": code, "name": s["name"], "industry": ind, "score": pts, "close": s["close"],
+            "passed": code in chosen_codes, "recId": f"{date}-{code}" if code in chosen_codes else None,
+            "reason": "\n".join(why), "plan": make_plan(s["close"]),
+        })
+        if len(cand) >= N_CANDIDATES:
+            break
+    state["candidates"] = {"date": date, "items": cand}
 
     # 3) 寫入歷史與狀態
     for code, s in stocks.items():
