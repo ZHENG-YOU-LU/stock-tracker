@@ -15,10 +15,13 @@ from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from pathlib import Path
 
+import trader
+
 BASE = "https://openapi.twse.com.tw/v1/exchangeReport/"
 DATA = Path("data")
 STATE_F = DATA / "state.json"
 PRICES_F = DATA / "prices.json"
+PORTFOLIO_F = DATA / "portfolio.json"
 TZ = timezone(timedelta(hours=8))
 
 # ---- 可調整參數 ----
@@ -229,10 +232,10 @@ def main():
         if not re.fullmatch(r"[1-9]\d{3}", code):
             continue
         close, vol, val, chg = (num(r.get(k)) for k in ("ClosingPrice", "TradeVolume", "TradeValue", "Change"))
-        opn = num(r.get("OpeningPrice"))
+        opn, hi, lo = num(r.get("OpeningPrice")), num(r.get("HighestPrice")), num(r.get("LowestPrice"))
         if not close or close <= 0:
             continue
-        stocks[code] = {"name": r.get("Name", ""), "close": close, "vol": vol or 0, "val": val or 0, "chg": chg or 0, "open": opn}
+        stocks[code] = {"name": r.get("Name", ""), "close": close, "vol": vol or 0, "val": val or 0, "chg": chg or 0, "open": opn, "high": hi, "low": lo}
     if len(stocks) < 500:
         sys.exit(f"資料異常：只取得 {len(stocks)} 檔，中止更新")
 
@@ -358,6 +361,16 @@ def main():
         if len(cand) >= N_CANDIDATES:
             break
     state["candidates"] = {"date": date, "items": cand}
+
+    # 模擬投資人：用前一個交易日的推薦在今天開盤買進，並處理持股的停損、停利（出錯不影響主流程）
+    try:
+        pf = trader.load(PORTFOLIO_F) or trader.new_portfolio()
+        prev_date = state["market"][-2]["date"] if len(state["market"]) >= 2 else None
+        if trader.step(pf, state, stocks, date, prev_date, weak):
+            trader.save(pf, PORTFOLIO_F)
+            print(f"模擬投資人：{pf['journal'][-1]['text']}")
+    except Exception as e:
+        print(f"::warning::模擬投資人執行失敗：{e}")
 
     # 3) 寫入歷史與狀態
     for code, s in stocks.items():
