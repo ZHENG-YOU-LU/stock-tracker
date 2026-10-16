@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import quotes
+import trader
 import update
 
 TZ = timezone(timedelta(hours=8))
@@ -168,6 +169,17 @@ def cmd_purge(mode):
     return f"已清除{label}紀錄：追蹤 {len(ids)} 筆、推薦 {n_before - len(state['recommendations'])} 筆"
 
 
+def cmd_simreset(capital_text):
+    try:
+        capital = float(capital_text) if capital_text else trader.INITIAL_CAPITAL
+    except ValueError:
+        raise Fail("初始資金必須是數字")
+    if not 100_000 <= capital <= 100_000_000:
+        raise Fail("初始資金請設定在 10 萬到 1 億之間")
+    trader.save(trader.new_portfolio(capital), update.PORTFOLIO_F)
+    return f"模擬帳戶已重新開始，初始資金 NT$ {capital:,.0f}，會從下一個有新資料的交易日開始運作"
+
+
 def auto_backfill():
     """替沒有產業的舊紀錄補上產業；回傳補了幾筆。"""
     state = load_state()
@@ -196,6 +208,8 @@ def main():
             msg = cmd_delete(code)
         elif action == "purge":
             msg = cmd_purge(code)
+        elif action == "simreset":
+            msg = cmd_simreset(cost)
         else:
             raise Fail(f"未知的動作：{action}")
         try:
