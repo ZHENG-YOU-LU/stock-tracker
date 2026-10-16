@@ -257,6 +257,106 @@
     <p x-show="trackingList.length === 0" class="card text-sm text-slate-500 dark:text-slate-400">沒有符合的紀錄。</p>
   </section>
 
+  <!-- ===== 模擬投資人 ===== -->
+  <section x-show="tab === 'sim' && !error" class="space-y-4">
+    <div class="card text-sm">
+      <h2 class="font-bold">🤖 模擬投資人（紙上交易）</h2>
+      <p class="mt-1 text-slate-600 dark:text-slate-300">不是真的下單。程式用虛擬資金，照推薦和下面的規則自己買賣，每一筆都寫下原因，讓你觀察它的決策好不好。</p>
+      <details class="mt-2">
+        <summary class="cursor-pointer text-xs text-indigo-600 dark:text-indigo-400">它的交易規則與假設</summary>
+        <ul class="sub mt-2 list-disc space-y-1 pl-5">
+          <li>買進：推薦隔天開盤，開盤沒高過「可接受上限」才買，開高就放棄，跌破停損價也不接刀。</li>
+          <li>部位：每筆停損最多虧總資產 1%（大盤偏弱時減半），單檔最多 15%，最多同時 8 檔，至少留 10% 現金。</li>
+          <li>賣出：停損 −7%、停利 +15%；賺超過 8% 後，停損會跟著收盤高點 −7% 往上移；持有滿 20 個交易日就出場。</li>
+          <li>成本：手續費 0.1425%（買賣各一次，未打折）、證交稅 0.3%。</li>
+          <li>成交假設：開盤價買進，觸價就以停損價或目標價成交，同一天兩者都碰到時算停損。沒有計入滑價和漲跌停鎖死，所以結果會比真實情況偏樂觀。</li>
+        </ul>
+      </details>
+    </div>
+
+    <div class="card text-sm text-slate-500 dark:text-slate-400" x-show="!pf">模擬帳戶還沒有資料。每日排程跑過後會自動開始，從推薦的隔一個交易日才會有第一筆買進。</div>
+
+    <div x-show="pf" class="space-y-4">
+      <div class="grid grid-cols-2 gap-3">
+        <div class="stat"><p class="sub">總資產</p><p class="mt-1 text-xl font-bold" x-text="'NT$ ' + Math.round(pfEquity).toLocaleString('zh-TW')"></p><p class="sub" x-text="'初始 NT$ ' + Math.round(pf?.initialCapital || 0).toLocaleString('zh-TW')"></p></div>
+        <div class="stat"><p class="sub">報酬率</p><p class="mt-1 text-xl font-bold" :class="cls(pfRet)" x-text="pct(pfRet)"></p><p class="sub" x-text="'同期大盤 ' + pct(pfMktRet)"></p></div>
+        <div class="stat"><p class="sub">已實現損益（賣出）</p><p class="mt-1 text-xl font-bold" :class="cls(pfStats.realized)" x-text="(pfStats.realized > 0 ? '+' : '') + Math.round(pfStats.realized).toLocaleString('zh-TW')"></p><p class="sub" x-text="'已賣出 ' + pfStats.n + ' 筆'"></p></div>
+        <div class="stat"><p class="sub">勝率</p><p class="mt-1 text-xl font-bold" x-text="pfStats.win == null ? '—' : pfStats.win.toFixed(0) + '%'"></p><p class="sub" x-text="'盈虧比 ' + (pfStats.pf == null ? '—' : pfStats.pf === Infinity ? '∞' : pfStats.pf.toFixed(2))"></p></div>
+        <div class="stat"><p class="sub">最大回撤</p><p class="mt-1 text-xl font-bold" :class="cls(pfDD)" x-text="pct(pfDD)"></p></div>
+        <div class="stat"><p class="sub">持股 / 現金</p><p class="mt-1 text-xl font-bold" x-text="pfPositions.length + ' 檔 / ' + pfCashPct + '%'"></p></div>
+      </div>
+
+      <div class="card">
+        <h2 class="font-bold">資產走勢 vs 大盤</h2>
+        <template x-if="pfChart">
+          <div>
+            <svg viewBox="0 0 300 100" class="mt-2 h-28 w-full" preserveAspectRatio="none" aria-hidden="true">
+              <path :d="pfChart.mk" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+              <path :d="pfChart.pf" fill="none" stroke="#6366f1" stroke-width="2" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+            </svg>
+            <p class="sub mt-1"><span class="text-indigo-500">━</span> 模擬帳戶　<span class="text-slate-400">━</span> 大盤（等權重指數）　起點 = 100</p>
+          </div>
+        </template>
+        <p class="sub mt-2" x-show="!pfChart">至少要 2 個交易日的資料才畫得出走勢。</p>
+      </div>
+
+      <div class="card">
+        <h2 class="font-bold" x-text="'目前持股（' + pfPositions.length + '）'"></h2>
+        <div class="mt-2 space-y-2">
+          <template x-for="p in pfPositions" :key="p.code">
+            <div class="rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-700">
+              <div class="flex items-start justify-between gap-2"><b x-text="p.code + ' ' + p.name"></b><span class="sub" x-text="'持有 ' + p.days + ' 個交易日'"></span></div>
+              <p class="sub" x-text="'買進 ' + p.entryDate + ' @ ' + p.entryPrice + ' × ' + p.shares.toLocaleString('zh-TW') + ' 股' + (p.industry ? '・' + p.industry : '')"></p>
+              <div class="mt-2 grid grid-cols-3 gap-2">
+                <div><p class="sub">最新收盤</p><p class="font-bold" x-text="money(p.last)"></p></div>
+                <div><p class="sub">未實現</p><p class="font-bold" :class="cls(unrealPct(p))" x-text="pct(unrealPct(p))"></p></div>
+                <div><p class="sub" x-text="p.trailing ? '移動停損' : '停損'"></p><p class="font-bold" x-text="p.stop + ' / ' + p.target"></p></div>
+              </div>
+            </div>
+          </template>
+        </div>
+        <p class="sub mt-2" x-show="pfPositions.length === 0">目前空手，沒有持股。</p>
+      </div>
+
+      <div class="card">
+        <h2 class="font-bold">交易紀錄</h2>
+        <div class="mt-2 divide-y divide-slate-100 dark:divide-slate-800">
+          <template x-for="(t, i) in pfTrades" :key="t.date + t.type + t.code + i">
+            <div class="py-3 text-sm">
+              <div class="flex items-start justify-between gap-2">
+                <span class="font-bold" x-text="tradeIcon(t) + ' ' + t.code + ' ' + t.name"></span>
+                <span class="sub shrink-0" x-text="t.date"></span>
+              </div>
+              <p class="mt-1" x-show="t.type !== 'skip'">
+                <span x-text="(t.type === 'buy' ? '買進 ' : '賣出 ') + t.price + ' × ' + t.shares.toLocaleString('zh-TW') + ' 股'"></span>
+                <span x-show="t.type === 'sell'" :class="cls(t.pnl)" x-text="'　' + (t.pnl > 0 ? '+' : '') + t.pnl.toLocaleString('zh-TW') + '（' + pct(t.pnlPct) + '）・持有 ' + t.days + ' 天'"></span>
+              </p>
+              <p class="sub mt-1 whitespace-pre-line break-words" x-text="t.reason"></p>
+            </div>
+          </template>
+        </div>
+        <p class="sub mt-2" x-show="!pf?.trades?.length">還沒有任何交易。</p>
+        <button type="button" class="btn mt-2" x-show="(pf?.trades?.length || 0) > tradeLimit" @click="tradeLimit += 30">顯示更多</button>
+      </div>
+
+      <details class="card text-sm">
+        <summary class="cursor-pointer font-bold">每日手記</summary>
+        <ul class="mt-2 space-y-2">
+          <template x-for="j in pfJournal" :key="j.date">
+            <li class="sub"><b x-text="j.date"></b>　<span x-text="j.text"></span></li>
+          </template>
+        </ul>
+      </details>
+    </div>
+
+    <details class="card text-sm">
+      <summary class="cursor-pointer font-bold">⚙︎ 模擬設定</summary>
+      <p class="sub mt-2">重新開始會清空目前的持股和所有交易紀錄，從下一個有新資料的交易日開始。需要先完成權杖設定。</p>
+      <label class="mt-2 flex items-center gap-2"><span class="shrink-0">初始資金 NT$</span><input type="number" min="100000" step="100000" inputmode="numeric" x-model.number="simCapital" class="field !p-2"></label>
+      <button type="button" class="btn mt-2 text-red-600 dark:text-red-400" :disabled="busy" @click="simReset()">重新開始模擬</button>
+    </details>
+  </section>
+
   <!-- ===== 績效驗證 ===== -->
   <section x-show="tab === 'perf' && !error" class="space-y-4">
     <div class="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900" x-show="all.n < 30">
@@ -303,6 +403,7 @@
     <div class="card">
       <h2 class="font-bold">推薦規則（每個交易日收盤後自動執行）</h2>
       <p class="mt-2 text-slate-600 dark:text-slate-300">評分為 0–100 的連續分數，達 <b x-text="state.params?.threshold ?? 70"></b> 分才推薦：趨勢 30（站上月均價、過熱會扣分）、當日動能 20（漲 2.5% 最高）、量能 30（為近 5 日均量 2 倍滿分）、流動性 20（成交值排名越前越高）。量能歷史不足 3 天時不計入，其餘按比例換算。每天最多 <span x-text="state.params?.maxNew ?? 5"></span> 檔，同一產業最多 <span x-text="state.params?.maxPerIndustry ?? 2"></span> 檔。停損 −7%、目標 +15%、最長追蹤 <span x-text="state.params?.maxDays ?? 20"></span> 個交易日。</p>
+      <p class="mt-2 text-slate-600 dark:text-slate-300">模擬投資人：另開一個虛擬帳戶，照推薦在隔天開盤買進，並自己處理停損、停利與移動停損，每筆交易都留有原因。這是紙上交易，不會真的下單，詳見「模擬」分頁。</p>
       <p class="mt-2 text-slate-600 dark:text-slate-300">明日買進計畫：理想買價是收盤價的 99%（掛限價等小回檔），可接受上限是收盤價的 101.5%，開盤超過就不追。系統會在推薦隔天記錄真實開盤價，統計「照計畫買」到底賺不賺。</p>
       <p class="mt-2 text-slate-600 dark:text-slate-300">大盤環境過濾：當大盤（等權重指數）低於近 5 日均線時，推薦門檻 +5 分、每天最多 3 檔，行情轉弱時自動收斂。</p>
       <p class="sub mt-2">這是量化規則篩選，不是投資建議，也不保證獲利。台股慣例：紅色上漲、綠色下跌。</p>
@@ -328,7 +429,7 @@
 </main>
 
 <nav class="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white/95 backdrop-blur dark:border-slate-700 dark:bg-slate-900/95" style="padding-bottom: env(safe-area-inset-bottom, 0px)">
-  <div class="mx-auto grid max-w-3xl grid-cols-4">
+  <div class="mx-auto grid max-w-3xl grid-cols-5">
     <template x-for="tb in tabs" :key="tb.id">
       <button type="button" @click="go(tb.id)" class="flex flex-col items-center gap-0.5 py-2 text-xs"
         :class="tab === tb.id ? 'font-bold text-indigo-600 dark:text-indigo-400' : 'text-slate-500 dark:text-slate-400'"
@@ -344,12 +445,12 @@ function app() {
   return {
     tabs: [
       { id: 'home', label: '首頁', icon: '🏠' }, { id: 'track', label: '追蹤', icon: '📈' },
-      { id: 'perf', label: '績效', icon: '🧪' }, { id: 'about', label: '說明', icon: 'ℹ️' }
+      { id: 'sim', label: '模擬', icon: '🤖' }, { id: 'perf', label: '績效', icon: '🧪' }, { id: 'about', label: '說明', icon: 'ℹ️' }
     ],
     statuses: ['追蹤中', '已達標', '已失效', '已結案'],
     tab: 'home', view: 'active', sort: 'new', error: '', loading: false,
     state: { recommendations: [], tracking: [], market: [], lastDate: null, updatedAt: null },
-    riskBudget: 0, live: null, token: '', tokenInput: '', showSettings: false, busy: false, busyMsg: '',
+    pf: null, tradeLimit: 30, simCapital: 1000000, riskBudget: 0, live: null, token: '', tokenInput: '', showSettings: false, busy: false, busyMsg: '',
     addForm: { code: '', cost: '', note: '' },
 
     init() {
@@ -394,6 +495,7 @@ function app() {
         this.error = '讀不到 data/state.json。請透過 GitHub Pages 網址開啟，並確認每日排程已至少成功執行一次。';
       }
       try { this.live = await this.fetchData('data/live.json'); } catch (e) { this.live = null; }
+      try { this.pf = await this.fetchData('data/portfolio.json'); } catch (e) { this.pf = null; }
       this.loading = false;
     },
 
@@ -480,6 +582,44 @@ function app() {
     get measured() { return this.state.tracking.filter(t => t.snapshots.length && t.source !== 'manual'); },
     get manualMeasured() { return this.state.tracking.filter(t => t.snapshots.length && t.source === 'manual'); },
     get all() { return this.stat(this.measured); },
+    get pfPositions() { return (this.pf && this.pf.positions) || []; },
+    get pfEquity() { const e = (this.pf && this.pf.equity) || []; return e.length ? e[e.length - 1].equity : (this.pf ? this.pf.initialCapital : 0); },
+    get pfRet() { return this.pf && this.pf.initialCapital ? (this.pfEquity / this.pf.initialCapital - 1) * 100 : null; },
+    get pfCashPct() { const e = (this.pf && this.pf.equity) || []; return e.length && e[e.length - 1].equity ? Math.round(e[e.length - 1].cash / e[e.length - 1].equity * 100) : 100; },
+    get pfMktRet() {
+      const e = (this.pf && this.pf.equity) || [];
+      if (e.length < 2) return null;
+      const m = this.state.market, a = m.find(x => x.date === e[0].date), b = m.find(x => x.date === e[e.length - 1].date);
+      return a && b ? (b.idx / a.idx - 1) * 100 : null;
+    },
+    get pfStats() {
+      const s = ((this.pf && this.pf.trades) || []).filter(t => t.type === 'sell');
+      const w = s.filter(t => t.pnl > 0), l = s.filter(t => t.pnl <= 0);
+      const gw = w.reduce((a, t) => a + t.pnl, 0), gl = -l.reduce((a, t) => a + t.pnl, 0);
+      return { n: s.length, win: s.length ? w.length / s.length * 100 : null, realized: s.reduce((a, t) => a + t.pnl, 0), pf: gl > 0 ? gw / gl : (gw > 0 ? Infinity : null) };
+    },
+    get pfDD() {
+      let peak = -Infinity, dd = 0;
+      for (const e of ((this.pf && this.pf.equity) || [])) { peak = Math.max(peak, e.equity); dd = Math.min(dd, (e.equity / peak - 1) * 100); }
+      return dd;
+    },
+    get pfTrades() { return [...((this.pf && this.pf.trades) || [])].reverse().slice(0, this.tradeLimit); },
+    get pfJournal() { return [...((this.pf && this.pf.journal) || [])].reverse().slice(0, 15); },
+    get pfChart() {
+      const eq = (this.pf && this.pf.equity) || [];
+      if (eq.length < 2) return null;
+      const mk = this.state.market, base = eq[0].equity, m0 = (mk.find(x => x.date === eq[0].date) || {}).idx;
+      const a = eq.map(e => e.equity / base * 100);
+      const b = eq.map(e => { const m = mk.find(x => x.date === e.date); return m && m0 ? m.idx / m0 * 100 : null; });
+      const vals = [...a, ...b.filter(v => v != null)], lo = Math.min(...vals), hi = Math.max(...vals), span = (hi - lo) || 1;
+      const path = arr => arr.map((v, i) => v == null ? null : (i ? 'L' : 'M') + (i / (arr.length - 1) * 300).toFixed(1) + ',' + (95 - (v - lo) / span * 90).toFixed(1)).filter(Boolean).join(' ');
+      return { pf: path(a), mk: path(b) };
+    },
+    unrealPct(p) { return p.entryPrice > 0 ? ((p.last ?? p.entryPrice) / p.entryPrice - 1) * 100 : null; },
+    tradeIcon(t) { return t.type === 'buy' ? '🛒 買進' : t.type === 'sell' ? '💰 賣出' : '⏭ 放棄'; },
+    async simReset() {
+      if (confirm('重新開始模擬？目前的持股與所有交易紀錄都會清空。')) await this.run('simreset', { cost: String(this.simCapital || 1000000) });
+    },
     get skipped() { return this.measured.filter(t => t.entry && !t.entry.filled).length; },
     get regime() {
       const m = this.state.market;
